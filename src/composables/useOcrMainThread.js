@@ -27,12 +27,10 @@ import {
 // ============================================================================ 
 
 // ONNX Runtime WASM CDN version
-// IMPORTANT: The npm package is 1.24.1, but the WebGPU asyncify WASM from 1.24.1 has a
-// regression causing "Buffer used in submit while destroyed" errors. The 1.23.2 WASM is
-// compatible with the 1.24.1 JS module and does not have this WebGPU buffer management bug.
-// See: ort-wasm-simd-threaded.asyncify.wasm — used exclusively by the WebGPU execution path.
-// The CPU worker (ocr.worker.js) uses regular ort-wasm-simd-threaded.wasm which is unaffected.
-const ONNX_WASM_VERSION = '1.23.2'
+// v1.24.1 had a WebGPU buffer management regression ("Buffer used in submit while destroyed")
+// caused by Pre-Pack tensors being freed before command buffer submission (onnxruntime#27068).
+// Fixed in v1.24.2 via LazyRelease for prepack allocator (onnxruntime#27077).
+const ONNX_WASM_VERSION = '1.24.2'
 const ONNX_CDN_BASE = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ONNX_WASM_VERSION}/dist/`
 
 // Lazy-loaded ONNX Runtime module

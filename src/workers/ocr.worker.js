@@ -34,7 +34,7 @@ import {
 } from '../utils/ocrUtils.js'
 
 // Configure ONNX Runtime WASM paths (must be set before any session creation)
-ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.1/dist/'
+ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.2/dist/'
 
 // ============================================================================
 // Singleton State

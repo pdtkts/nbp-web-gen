@@ -2,6 +2,18 @@
 
 This page documents version updates for Mediator.
 
+## v0.31.2
+
+_2026-03-04_
+
+### Improvements
+- **Slides**: Page list height now adapts to viewport size, significantly increasing usable space on desktop
+
+### Performance
+- **Slides**: Parallelize storage writes (OPFS + IndexedDB) after regeneration confirmation, and show success toast only after save completes
+- **Slides**: Parallelize image and narration OPFS storage on initial generation, eliminating duplicate loadHistory calls, with a new "saved to history" confirmation toast
+- **Slides**: Fix audio player appearing tens of seconds late by setting preview URLs before blocking OPFS image storage
+
 ## v0.31.1
 
 _2026-03-03_

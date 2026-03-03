@@ -937,7 +937,7 @@ const resetSlidesOptions = async () => {
     <div v-if="options.pages.length > 0" class="space-y-4">
       <h4 class="text-sm font-medium text-text-primary">{{ $t('slides.pagesList') }}</h4>
 
-      <div class="space-y-3 max-h-[350px] overflow-y-auto pr-1">
+      <div class="space-y-3 max-h-[60vh] lg:max-h-[calc(100dvh_-_84px)] overflow-y-auto pr-1">
         <SlidesPageCard
           v-for="(page, index) in options.pages"
           :key="page.id"

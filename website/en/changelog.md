@@ -2,6 +2,16 @@
 
 This page documents version updates for Mediator.
 
+## v0.31.3
+
+_2026-03-04_
+
+### Security
+- **Dependencies**: Fix serialize-javascript RCE vulnerability (GHSA-5c6j-r48x-rmvq) via overrides to 7.0.4
+
+### Improvements
+- **Dependencies**: Upgrade 14 packages — Vue 3.5.29, Tailwind CSS 4.2.1, Fabric 7.2.0, ONNX Runtime Web 1.24.2, pdfjs-dist 5.5.207, Three.js 0.183.2, Plotly 3.4.0, and more
+
 ## v0.31.2
 
 _2026-03-04_

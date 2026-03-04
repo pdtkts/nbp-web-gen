@@ -2,6 +2,16 @@
 
 此頁面記錄 Mediator 的版本更新內容。
 
+## v0.31.3
+
+_2026-03-04_
+
+### 安全性
+- **依賴套件**: 修復 serialize-javascript RCE 漏洞（GHSA-5c6j-r48x-rmvq），透過 overrides 強制升級至 7.0.4
+
+### 改進
+- **依賴套件**: 升級 14 個套件 — Vue 3.5.29、Tailwind CSS 4.2.1、Fabric 7.2.0、ONNX Runtime Web 1.24.2、pdfjs-dist 5.5.207、Three.js 0.183.2、Plotly 3.4.0 等
+
 ## v0.31.2
 
 _2026-03-04_

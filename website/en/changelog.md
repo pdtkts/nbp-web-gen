@@ -2,6 +2,16 @@
 
 This page documents version updates for Mediator.
 
+## v0.31.6
+
+_2026-03-05_
+
+### New Features
+- **History**: Agent mode and slides narration storage sizes now display in the history list (legacy records backfilled on startup)
+
+### Improvements
+- **History**: Move delete button to absolute-positioned overlay so the content area is no longer compressed, improving visual symmetry when not hovered
+
 ## v0.31.5
 
 _2026-03-05_

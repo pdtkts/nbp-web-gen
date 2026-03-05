@@ -2,6 +2,17 @@
 
 This page documents version updates for Mediator.
 
+## v0.31.4
+
+_2026-03-05_
+
+### New Features
+- **Transcript**: Add auto-scroll that syncs with audio playback progress every 3 seconds, with a toggle button in the panel header (setting persisted)
+- **Audio Player**: Add 1.75x playback speed option
+
+### Improvements
+- **History**: Automatically restore image model selection when loading from history
+
 ## v0.31.3
 
 _2026-03-04_

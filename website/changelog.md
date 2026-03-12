@@ -10,8 +10,10 @@ _2026-03-12_
 - **搜尋**: 升級至 Gemini Embedding 2 多模態模型，支援以文搜圖和以圖搜圖功能
 - **搜尋**: 搜尋結果新增圖片匹配標籤，區分文字與圖片命中
 
-### 改進
+### 效能
 - **搜尋**: Gemini embedding chunk 大小從 400 提升至 800 字元，提升語意連貫性
+
+### 重構
 - **搜尋**: Gemini API 呼叫遷移至 @google/genai SDK（與專案其他模組統一）
 
 ## v0.31.6
@@ -95,63 +97,16 @@ _2026-02-28_
 - **歷史還原**: 修正旁白逐字稿的頁面 ID 在還原後與實際頁面不匹配的問題
 - **歷史還原**: 修正 localStorage 還原時殘留的無效異動標記
 
-## v0.30.1
-
-_2026-02-27_
-
-### 修復
-- **PDF 轉換**: 修正 Worker 初始化失敗後 Promise 永遠不會 reject 的問題，現在會正確重設狀態以允許重試
-- **儲存**: 修正圖片/影片/旁白儲存的競態條件，改為依序 await 防止 IndexedDB 併發寫入衝突
-- **影片生成**: 修正取消按鈕未實際傳遞 AbortSignal 至輪詢迴圈的問題，現在可正確中斷影片生成
-- **影片生成**: 修正 AbortController 在生成失敗時未清理的問題，改用 try/finally 確保所有路徑都重設
-- **影片生成**: 修正輪詢等待中 abort listener 未正確清理的問題，防止 listener 累積
-- **角色儲存**: 修正動態副檔名寫入後讀取路徑仍硬編碼 `.webp` 的問題，新增多副檔名搜尋機制
-- **角色儲存**: 新增 MIME 類型嚴格驗證，拒絕不支援的圖片格式
-- **角色儲存**: 儲存新格式時自動刪除舊格式檔案，防止 resolver 返回過期資料
-- **圖片預覽**: 修正 Blob URL 記憶體洩漏，改用 watch + revokeObjectURL 清理
-- **Inpainting Worker**: 修正 `Array.fill()` 共享參考問題，改用 `Array.from()` 建立獨立物件
-- **OCR**: 修正 WebP/GIF 圖片 MIME 類型偵測遺漏，與 Worker 模式對齊
-- **OCR**: 修正 `isDetecting` ref 從未被設為 true 的問題
-- **主題**: 修正多個元件使用非響應式 DOM 屬性讀取主題的問題，改用 `useTheme()` composable
-- **動畫**: 修正 HeroTitle 與 CharacterCarousel 中 setTimeout 未在元件卸載時清理的問題
-- **AgentMessage**: 修正 DOMPurify hook 在 HMR 重新載入時重複註冊的問題，新增初始化防護
-- **搜尋選擇器**: 將硬編碼英文替換為 i18n 翻譯鍵
-- **歷史記錄**: 修正 `truncatePrompt` 在 null 輸入時的 TypeError
-- **Embedding 探索器**: 新增 colorBy/hoverText/hoverLength 設定的 watcher 以即時更新圖表
-- **P2P 同步**: 修正 `pendingConversation` 在重設狀態時未清除的問題
-- **LINE 貼圖**: 修正錯誤路徑中 Object URL 未釋放的記憶體洩漏
-- **LINE 貼圖**: 修正對 data URL 錯誤呼叫 `revokeObjectURL` 的問題
-- **API Key 管理**: 修正重設計時器在 scope dispose 時未清理的問題
-
-### 重構
-- 移除 19 處已確認的死碼（未使用的匯出、不可達的分支、無效 CSS 類別）
-- 提取二進位工具函式至共用模組 `binaryUtils.js`（DRY）
-- 修正檔案名稱拼寫錯誤 `useCloudfareTurn` → `useCloudflareTurn`
-- 移除 `style.css` 中未定義變數的 glow CSS 類別
-- 移除 PPTX 匯出中的生產環境除錯日誌
-- 簡化主題切換的 `startViewTransition` 條件判斷
-
-### 測試
-- 新增 `binaryUtils.js` 的 20 項單元測試（chunked 字串轉換、MIME 偵測、Array.from 模式）
-
-## v0.30.0
-
-_2026-02-27_
-
-### 新功能
-- **圖片模型選擇器**: 在全域設定中新增圖片模型切換，支援 Gemini 3 Pro Image（品質較高）與 Gemini 3.1 Flash Image（速度較快），設定自動記住
-- **簡報轉 PPTX**: 新增第三個文字移除模型「Nano Banana 2」（`gemini-3.1-flash-image-preview`），速度快且品質好，需使用付費金鑰
-- **文字模型**: 移除已停用的 Gemini 3 Pro 文字模型，保留 Gemini 3 Flash 與 Gemini 3.1 Pro
-
-### 修復
-- **燈箱**: 修正簡報旁白逐字稿在非簡報模式的圖片預覽中錯誤顯示的問題
-
-### 依賴更新
-- `@google/genai` 1.41.0 → 1.43.0
-
 ---
 
 ## 較早版本
+
+### v0.30.x - 圖片模型選擇器、大規模 Bug 修復與程式碼品質強化
+
+_2026-02-27_
+
+- **v0.30.1** _(02-27)_: 修復 20+ 個 bug（PDF Worker、儲存競態、影片 Abort、角色 MIME、Blob 洩漏、OCR 偵測等），移除 19 處死碼，提取 binaryUtils 共用模組，新增 20 項單元測試
+- **v0.30.0** _(02-27)_: 圖片模型選擇器（Pro/Flash 切換）、PPTX 第三個文字移除模型、移除停用的 Gemini 3 Pro 文字模型
 
 ### v0.29.x - 燈箱逐字稿面板與旁白語速控制
 

@@ -7,7 +7,7 @@
  *   - On cold start: restore from snapshot → bulk insert → immediately searchable
  *   - SelfHeal runs in background to detect deltas (new/deleted records)
  *   - Per-provider independent snapshots: each provider has its own chunk params and embeddings
- *   - Embedding providers: Gemini API (768d, cs400) or local Transformers.js (384d, cs200)
+ *   - Embedding providers: Gemini API (768d, cs800, multimodal) or local Transformers.js (384d, cs200)
  *
  * Communication Protocol:
  * Main → Worker:
@@ -38,8 +38,10 @@
  */
 
 import { create, search, insertMultiple, removeMultiple } from '@orama/orama'
+import { GoogleGenAI } from '@google/genai'
 
 import { extractText, chunkText, extractAgentMessages, SEARCH_DEFAULTS } from '../utils/search-core.js'
+import { prepareEmbeddingMaterial } from '../utils/embedding-material.js'
 
 // ============================================================================
 // Constants
@@ -48,19 +50,19 @@ import { extractText, chunkText, extractAgentMessages, SEARCH_DEFAULTS } from '.
 const DB_NAME = 'nanobanana-search'
 const DB_STORE = 'orama-snapshot'
 const DB_VERSION = 3 // v3: full doc snapshot (v2 was embedding-only cache, v1 was unused)
-const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models'
 const EMBEDDING_BATCH_API_LIMIT = 100 // Max texts per batchEmbedContents request
 const BATCH_SIZE = 50 // Documents per indexing batch
 const MAX_CACHE_ENTRIES = 5000 // In-memory document embedding cache cap (not persisted)
 
 const PROVIDER_CONFIG = {
-  gemini: { dims: 768, model: 'gemini-embedding-001', chunkSize: 400, chunkOverlap: 100, contextWindow: 600 },
+  gemini: { dims: 768, model: 'gemini-embedding-2-preview', chunkSize: 800, chunkOverlap: 200, contextWindow: 1200 },
   local: { dims: 384, model: 'intfloat/multilingual-e5-small', chunkSize: 200, chunkOverlap: 50, contextWindow: 400 },
 }
 
 // Bump when extractText/indexRecord logic changes to force snapshot rebuild.
 // v1: initial, v2: agent mode indexes user+model messages + modeLabel field
-const EXTRACTION_VERSION = 2
+// v3: gemini-embedding-2-preview + multimodal image chunks + chunkSize 800
+const EXTRACTION_VERSION = 3
 
 /**
  * Searchable mode labels for BM25 matching (English + Chinese).
@@ -139,6 +141,10 @@ const FREE_KEY_COOLDOWN_MS = 60 * 60 * 1000 // 1 hour
 
 // Active embedding provider: 'gemini' | 'local' | null
 let activeProvider = null
+
+// @google/genai SDK instance (lazy-created, rebuilt when API key changes)
+let aiInstance = null
+let aiInstanceKey = null // Track which key was used to create the instance
 
 // Transformers.js pipeline for local embedding (lazy loaded)
 let localPipeline = null
@@ -274,7 +280,7 @@ async function loadSnapshot(provider) {
 async function saveSnapshot(provider) {
   if (!provider) return
   return saveSnapshotKey(`snapshot-${provider}`, {
-    version: 4,
+    version: 5,
     configVersion: getProviderConfigVersion(provider),
     docs: snapshotDocs,
   })
@@ -361,7 +367,7 @@ async function migrateV3SnapshotIfExists() {
 
   if (localDocs.length > 0) {
     await saveSnapshotKey('snapshot-local', {
-      version: 4,
+      version: 5,
       configVersion: getProviderConfigVersion('local'),
       docs: localDocs,
     })
@@ -458,6 +464,8 @@ function createFreshDb(provider) {
       parentId: 'string',
       chunkIndex: 'number',
       chunkText: 'string',
+      chunkType: 'string',   // 'text' | 'image'
+      imageIndex: 'number',  // index in images[] (-1 for text chunks)
       mode: 'string',
       modeLabel: 'string',
       timestamp: 'number',
@@ -470,7 +478,7 @@ function createFreshDb(provider) {
 }
 
 // ============================================================================
-// Gemini Embedding API
+// Gemini Embedding API (via @google/genai SDK)
 // ============================================================================
 
 /**
@@ -481,6 +489,17 @@ function createFreshDb(provider) {
 function getApiKey() {
   if (apiKeyFree && !freeKeyExhausted) return apiKeyFree
   return apiKeyPrimary || null
+}
+
+/**
+ * Get or create a GoogleGenAI SDK instance for the given API key.
+ * Reuses existing instance if the key hasn't changed.
+ */
+function getAiInstance(apiKey) {
+  if (aiInstance && aiInstanceKey === apiKey) return aiInstance
+  aiInstance = new GoogleGenAI({ apiKey })
+  aiInstanceKey = apiKey
+  return aiInstance
 }
 
 /**
@@ -510,27 +529,20 @@ function getKeysToTry() {
 }
 
 /**
- * Call Gemini countTokens API (free, no billing).
+ * Call Gemini countTokens API (free, no billing) via SDK.
  * Fire-and-forget: used only for accurate cost tracking.
  * @param {string[]} texts - Texts to count tokens for
  * @param {string} apiKey - API key to use
  */
 async function countTokensInBackground(texts, apiKey) {
-  const geminiModel = PROVIDER_CONFIG.gemini.model
-  const url = `${GEMINI_API_BASE}/${geminiModel}:countTokens?key=${apiKey}`
-  const body = {
-    contents: [{ parts: texts.map((t) => ({ text: t })) }],
-  }
   try {
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+    const ai = getAiInstance(apiKey)
+    const result = await ai.models.countTokens({
+      model: PROVIDER_CONFIG.gemini.model,
+      contents: [{ parts: texts.map((t) => ({ text: t })) }],
     })
-    if (!resp.ok) return
-    const data = await resp.json()
-    if (data?.totalTokens) {
-      sessionEmbeddingTokens += data.totalTokens
+    if (result?.totalTokens) {
+      sessionEmbeddingTokens += result.totalTokens
     }
   } catch (err) {
     console.warn('[search.worker] countTokens failed (non-critical):', err.message)
@@ -538,7 +550,17 @@ async function countTokensInBackground(texts, apiKey) {
 }
 
 /**
- * Call Gemini batchEmbedContents API.
+ * Detect if an error is a 429 rate-limit error from the SDK.
+ * @param {Error} err
+ * @returns {boolean}
+ */
+function isRateLimitError(err) {
+  const msg = err?.message || ''
+  return msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED') || msg.includes('quota')
+}
+
+/**
+ * Call Gemini batchEmbedContents API via SDK.
  * Tries free key first (unless backed off), falls back to paid key on 429.
  * @param {string[]} texts
  * @param {'RETRIEVAL_DOCUMENT'|'RETRIEVAL_QUERY'} taskType
@@ -551,41 +573,29 @@ async function callGeminiBatchEmbed(texts, taskType) {
   const geminiModel = PROVIDER_CONFIG.gemini.model
   const dims = PROVIDER_CONFIG.gemini.dims
 
-  const body = {
-    requests: texts.map((text) => ({
-      model: `models/${geminiModel}`,
-      content: { parts: [{ text }] },
-      taskType,
-      outputDimensionality: dims,
-    })),
-  }
-
   for (const { key, isFree } of keysToTry) {
-    const url = `${GEMINI_API_BASE}/${geminiModel}:batchEmbedContents?key=${key}`
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
+    try {
+      const ai = getAiInstance(key)
+      const result = await ai.models.embedContent({
+        model: geminiModel,
+        contents: texts.map((text) => ({ parts: [{ text }] })),
+        config: { taskType, outputDimensionality: dims },
+      })
 
-    if (resp.status === 429) {
-      if (isFree) {
-        markFreeKeyExhausted()
-      } else {
-        console.warn('[search.worker] Paid key also rate-limited for embedding')
+      // Fire-and-forget: count actual tokens for cost tracking
+      countTokensInBackground(texts, key)
+      return (result.embeddings || []).map((e) => e.values)
+    } catch (err) {
+      if (isRateLimitError(err)) {
+        if (isFree) {
+          markFreeKeyExhausted()
+        } else {
+          console.warn('[search.worker] Paid key also rate-limited for embedding')
+        }
+        continue
       }
-      continue
+      throw err
     }
-
-    if (!resp.ok) {
-      const errText = await resp.text().catch(() => '')
-      throw new Error(`Gemini embedding API error ${resp.status}: ${errText.slice(0, 200)}`)
-    }
-
-    // Fire-and-forget: count actual tokens for cost tracking
-    countTokensInBackground(texts, key)
-    const data = await resp.json()
-    return (data.embeddings || []).map((e) => e.values)
   }
 
   // All keys exhausted (429 on all)
@@ -594,7 +604,7 @@ async function callGeminiBatchEmbed(texts, taskType) {
 }
 
 /**
- * Call Gemini embedContent API for a single text.
+ * Call Gemini embedContent API for a single text via SDK.
  * Tries free key first (unless backed off), falls back to paid key on 429.
  * @param {string} text
  * @param {'RETRIEVAL_DOCUMENT'|'RETRIEVAL_QUERY'} taskType
@@ -607,39 +617,127 @@ async function callGeminiSingleEmbed(text, taskType) {
   const geminiModel = PROVIDER_CONFIG.gemini.model
   const dims = PROVIDER_CONFIG.gemini.dims
 
-  const body = {
-    model: `models/${geminiModel}`,
-    content: { parts: [{ text }] },
-    taskType,
-    outputDimensionality: dims,
+  for (const { key, isFree } of keysToTry) {
+    try {
+      const ai = getAiInstance(key)
+      const result = await ai.models.embedContent({
+        model: geminiModel,
+        contents: { parts: [{ text }] },
+        config: { taskType, outputDimensionality: dims },
+      })
+
+      // Fire-and-forget: count actual tokens for cost tracking
+      countTokensInBackground([text], key)
+      return result.embeddings?.[0]?.values || null
+    } catch (err) {
+      if (isRateLimitError(err)) {
+        if (isFree) {
+          markFreeKeyExhausted()
+        } else {
+          console.warn('[search.worker] Paid key also rate-limited for embedding')
+        }
+        continue
+      }
+      throw err
+    }
   }
 
+  return null
+}
+
+// ============================================================================
+// OPFS Image Access (for multimodal embedding)
+// ============================================================================
+
+/**
+ * Load an image from OPFS and convert to PNG base64 for embedding API.
+ * Gemini Embedding API requires PNG/JPEG — WebP is not supported.
+ * Uses OffscreenCanvas (available in Workers) for format conversion.
+ * @param {string} opfsPath - Path like "/images/{historyId}/{index}.webp"
+ * @returns {Promise<{ base64: string, mimeType: string }|null>}
+ */
+async function loadImageAsBase64(opfsPath) {
+  try {
+    const root = await navigator.storage.getDirectory()
+    const parts = opfsPath.split('/').filter(Boolean)
+    let dir = root
+    for (let i = 0; i < parts.length - 1; i++) {
+      dir = await dir.getDirectoryHandle(parts[i])
+    }
+    const fileName = parts[parts.length - 1]
+    const fileHandle = await dir.getFileHandle(fileName)
+    const file = await fileHandle.getFile()
+
+    // Convert to PNG via OffscreenCanvas (embedding API doesn't support WebP)
+    const bitmap = await createImageBitmap(await file.arrayBuffer().then((buf) => new Blob([buf], { type: file.type || 'image/webp' })))
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height)
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(bitmap, 0, 0)
+    bitmap.close()
+
+    const pngBlob = await canvas.convertToBlob({ type: 'image/png' })
+    const buffer = await pngBlob.arrayBuffer()
+    const bytes = new Uint8Array(buffer)
+    let binary = ''
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i])
+    }
+    return { base64: btoa(binary), mimeType: 'image/png' }
+  } catch (err) {
+    console.warn(`[search.worker] loadImageAsBase64 failed for ${opfsPath}:`, err.message)
+    return null
+  }
+}
+
+/**
+ * Call Gemini embedContent REST API for image embedding.
+ * Bypasses SDK because the SDK routes all embedContent calls through the
+ * batchEmbedContents endpoint, which does not support inlineData (images).
+ * Uses the singular embedContent REST endpoint directly.
+ * @param {string} base64 - Base64-encoded image data (PNG format)
+ * @param {string} mimeType - Image MIME type (should be 'image/png')
+ * @returns {Promise<Array<number>|null>}
+ */
+async function callGeminiMultimodalEmbed(base64, mimeType) {
+  const keysToTry = getKeysToTry()
+  if (keysToTry.length === 0) return null
+
+  const geminiModel = PROVIDER_CONFIG.gemini.model
+  const dims = PROVIDER_CONFIG.gemini.dims
+
   for (const { key, isFree } of keysToTry) {
-    const url = `${GEMINI_API_BASE}/${geminiModel}:embedContent?key=${key}`
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:embedContent?key=${key}`
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: {
+            parts: [{ inline_data: { mime_type: mimeType, data: base64 } }],
+          },
+          output_dimensionality: dims,
+        }),
+      })
 
-    if (resp.status === 429) {
-      if (isFree) {
-        markFreeKeyExhausted()
-      } else {
-        console.warn('[search.worker] Paid key also rate-limited for embedding')
+      if (!resp.ok) {
+        const errBody = await resp.text()
+        if (resp.status === 429) {
+          if (isFree) markFreeKeyExhausted()
+          else console.warn('[search.worker] Paid key also rate-limited for multimodal embedding')
+          continue
+        }
+        throw new Error(errBody)
       }
-      continue
-    }
 
-    if (!resp.ok) {
-      const errText = await resp.text().catch(() => '')
-      throw new Error(`Gemini embedding API error ${resp.status}: ${errText.slice(0, 200)}`)
+      const data = await resp.json()
+      return data.embedding?.values || null
+    } catch (err) {
+      if (isRateLimitError(err)) {
+        if (isFree) markFreeKeyExhausted()
+        continue
+      }
+      throw err
     }
-
-    // Fire-and-forget: count actual tokens for cost tracking
-    countTokensInBackground([text], key)
-    const data = await resp.json()
-    return data.embedding?.values || null
   }
 
   return null
@@ -831,19 +929,21 @@ async function indexRecord(record, conversation = null) {
     }
   }
 
-  // Insert into Orama (chunkText only — contextText stays out of BM25 index)
+  // Insert text chunks into Orama (chunkText only — contextText stays out of BM25 index)
   const modeLabel = MODE_SEARCH_LABELS[mode] || mode
-  const docs = chunks.map((chunk, i) => ({
+  const textDocs = chunks.map((chunk, i) => ({
     parentId,
     chunkIndex: chunk.index,
     chunkText: chunk.text,
+    chunkType: 'text',
+    imageIndex: -1,
     mode,
     modeLabel,
     timestamp,
     embedding: embeddings[i] || new Array(dims).fill(0),
   }))
 
-  const insertedIds = await insertMultiple(oramaDb, docs)
+  const insertedIds = await insertMultiple(oramaDb, textDocs)
   indexedParentIds.add(parentId)
 
   // Track Orama internal doc IDs for reliable removal
@@ -861,17 +961,96 @@ async function indexRecord(record, conversation = null) {
 
   // Update snapshot: simple replace (no merge — single provider per snapshot)
   snapshotDocs = snapshotDocs.filter((d) => d.parentId !== parentId)
-  for (let i = 0; i < docs.length; i++) {
+  for (let i = 0; i < textDocs.length; i++) {
     snapshotDocs.push({
-      parentId: docs[i].parentId,
-      chunkIndex: docs[i].chunkIndex,
-      chunkText: docs[i].chunkText,
+      parentId: textDocs[i].parentId,
+      chunkIndex: textDocs[i].chunkIndex,
+      chunkText: textDocs[i].chunkText,
+      chunkType: 'text',
+      imageIndex: -1,
       contextText: chunks[i].contextText,
-      mode: docs[i].mode,
-      modeLabel: docs[i].modeLabel,
-      timestamp: docs[i].timestamp,
-      embedding: docs[i].embedding,
+      mode: textDocs[i].mode,
+      modeLabel: textDocs[i].modeLabel,
+      timestamp: textDocs[i].timestamp,
+      embedding: textDocs[i].embedding,
     })
+  }
+
+  let totalDocs = textDocs.length
+
+  // ---- Multimodal image chunks (Gemini provider only) ----
+  if (activeProvider === 'gemini') {
+    const imageMaterial = prepareEmbeddingMaterial(record)
+    if (imageMaterial.length > 0) {
+      const imageDocs = []
+      for (let imgIdx = 0; imgIdx < imageMaterial.length; imgIdx++) {
+        const { text: imgText, imagePath } = imageMaterial[imgIdx]
+        const imgCacheKey = `${activeProvider}:${parentId}:img-${imgIdx}`
+        const cachedEmb = embeddingCache.get(imgCacheKey)
+
+        let imgEmbedding
+        if (cachedEmb) {
+          imgEmbedding = cachedEmb
+        } else {
+          try {
+            const imageData = await loadImageAsBase64(imagePath)
+            if (imageData) {
+              imgEmbedding = await callGeminiMultimodalEmbed(imageData.base64, imageData.mimeType)
+              if (imgEmbedding && imgEmbedding.length === dims) {
+                embeddingCache.set(imgCacheKey, imgEmbedding)
+              }
+            }
+          } catch (err) {
+            console.warn(`[search.worker] Multimodal embed failed for ${imagePath}:`, err.message)
+          }
+        }
+
+        // Skip image chunk if embedding failed (don't insert zero-vectors that pollute search results)
+        if (!imgEmbedding || imgEmbedding.length !== dims) continue
+
+        const imgChunkIndex = chunks.length + imgIdx
+        const doc = {
+          parentId,
+          chunkIndex: imgChunkIndex,
+          chunkText: imgText || `[image ${imgIdx}]`,
+          chunkType: 'image',
+          imageIndex: imgIdx,
+          mode,
+          modeLabel,
+          timestamp,
+          embedding: imgEmbedding,
+        }
+        imageDocs.push(doc)
+
+        // Store context for image chunks (the paired text)
+        const ctxKey = `${parentId}:${imgChunkIndex}`
+        contextTextMap.set(ctxKey, imgText || `[image ${imgIdx}]`)
+      }
+
+      if (imageDocs.length > 0) {
+        const imgInsertedIds = await insertMultiple(oramaDb, imageDocs)
+        for (const docId of imgInsertedIds) {
+          docIdSet.add(docId)
+        }
+        // Add to snapshot
+        for (let i = 0; i < imageDocs.length; i++) {
+          snapshotDocs.push({
+            parentId: imageDocs[i].parentId,
+            chunkIndex: imageDocs[i].chunkIndex,
+            chunkText: imageDocs[i].chunkText,
+            chunkType: 'image',
+            imageIndex: imageDocs[i].imageIndex,
+            contextText: imageDocs[i].chunkText,
+            mode: imageDocs[i].mode,
+            modeLabel: imageDocs[i].modeLabel,
+            timestamp: imageDocs[i].timestamp,
+            embedding: imageDocs[i].embedding,
+          })
+        }
+        totalDocs += imageDocs.length
+        console.log(`[search.worker] Indexed ${imageDocs.length} image chunks for parent=${parentId}`)
+      }
+    }
   }
 
   // Evict oldest in-memory cache entries if over limit (FIFO, not LRU —
@@ -884,7 +1063,7 @@ async function indexRecord(record, conversation = null) {
     }
   }
 
-  return docs.length
+  return totalDocs
 }
 
 // ============================================================================
@@ -1056,6 +1235,8 @@ async function performSearch(query, { mode = '', strategy = 'hybrid' } = {}) {
       parentId: hit.document.parentId,
       chunkIndex: hit.document.chunkIndex,
       chunkText: hit.document.chunkText,
+      chunkType: hit.document.chunkType || 'text',
+      imageIndex: hit.document.imageIndex ?? -1,
       contextText: contextTextMap.get(key) || hit.document.chunkText,
       mode: hit.document.mode,
       timestamp: hit.document.timestamp,
@@ -1198,7 +1379,7 @@ async function switchProvider(newProvider, requestId) {
 
   if (
     savedData &&
-    savedData.version === 4 &&
+    savedData.version === 5 &&
     savedData.configVersion === expectedConfigVersion &&
     Array.isArray(savedData.docs) &&
     savedData.docs.length > 0
@@ -1213,6 +1394,8 @@ async function switchProvider(newProvider, requestId) {
         parentId: doc.parentId,
         chunkIndex: doc.chunkIndex,
         chunkText: doc.chunkText,
+        chunkType: doc.chunkType || 'text',
+        imageIndex: doc.imageIndex ?? -1,
         mode: doc.mode,
         modeLabel: doc.modeLabel || MODE_SEARCH_LABELS[doc.mode] || doc.mode,
         timestamp: doc.timestamp,
@@ -1304,7 +1487,7 @@ async function initialize(keys = {}) {
     const dims = getActiveDims()
 
     // 4. Validate and restore from snapshot
-    if (savedData && savedData.version === 4) {
+    if (savedData && savedData.version === 5) {
       const expectedConfigVersion = getProviderConfigVersion(activeProvider)
       if (savedData.configVersion && savedData.configVersion !== expectedConfigVersion) {
         console.warn(
@@ -1321,6 +1504,8 @@ async function initialize(keys = {}) {
             parentId: doc.parentId,
             chunkIndex: doc.chunkIndex,
             chunkText: doc.chunkText,
+            chunkType: doc.chunkType || 'text',
+            imageIndex: doc.imageIndex ?? -1,
             mode: doc.mode,
             modeLabel: doc.modeLabel || MODE_SEARCH_LABELS[doc.mode] || doc.mode,
             timestamp: doc.timestamp,
@@ -1411,6 +1596,9 @@ self.addEventListener('message', async (event) => {
             if (freeKeyResetTimer) { clearTimeout(freeKeyResetTimer); freeKeyResetTimer = null }
           }
         }
+        // Invalidate SDK instance so it's recreated with the new key
+        aiInstance = null
+        aiInstanceKey = null
         console.log(`[search.worker] API keys updated (primary=${!!apiKeyPrimary}, free=${!!apiKeyFree}, freeBackedOff=${freeKeyExhausted})`)
         break
       }

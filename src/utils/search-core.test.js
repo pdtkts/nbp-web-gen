@@ -616,13 +616,17 @@ describe('stripRecordForIndexing', () => {
       mode: 'generate',
       prompt: 'a cat',
       timestamp: 1000,
-      images: ['data:image/png;base64,...'],
+      images: [{ opfsPath: '/images/abc/0.webp', thumbnail: 'base64data' }],
       thumbnail: 'data:image/png;base64,...',
       options: { style: 'anime', ratio: '1:1' },
     }
     const result = stripRecordForIndexing('abc', record)
-    expect(result).toEqual({ id: 'abc', mode: 'generate', prompt: 'a cat', timestamp: 1000 })
-    expect(result.images).toBeUndefined()
+    expect(result.id).toBe('abc')
+    expect(result.mode).toBe('generate')
+    expect(result.prompt).toBe('a cat')
+    expect(result.timestamp).toBe(1000)
+    // images preserves only opfsPath (no thumbnail/base64)
+    expect(result.images).toEqual([{ opfsPath: '/images/abc/0.webp' }])
     expect(result.thumbnail).toBeUndefined()
     expect(result.options).toBeUndefined()
   })
@@ -643,7 +647,7 @@ describe('stripRecordForIndexing', () => {
         globalStyleDirective: 'professional',
         scripts: [{ pageId: 1, script: 'hello', audioBlob: 'binary' }],
       },
-      images: ['heavy'],
+      images: [{ opfsPath: '/images/s1/0.webp' }],
     }
     const result = stripRecordForIndexing('s1', record)
     expect(result.options.pagesContent).toEqual([{ content: 'page1' }])
@@ -653,7 +657,8 @@ describe('stripRecordForIndexing', () => {
     expect(result.options.pagesRaw).toBeUndefined()
     expect(result.narration.globalStyleDirective).toBe('professional')
     expect(result.narration.scripts).toEqual([{ pageId: 1, script: 'hello' }])
-    expect(result.images).toBeUndefined()
+    // images preserves only opfsPath for multimodal embedding
+    expect(result.images).toEqual([{ opfsPath: '/images/s1/0.webp' }])
   })
 
   it('preserves video negativePrompt', () => {

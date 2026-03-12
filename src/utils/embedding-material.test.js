@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { prepareEmbeddingMaterial, buildDefault, buildSticker, buildSlides, stripAndTruncate } from './embedding-material'
+import { prepareEmbeddingMaterial, buildDefault, buildSticker, buildSlides, stripAndTruncate } from './embedding-material.js'
 
 // ============================================================================
 // stripAndTruncate

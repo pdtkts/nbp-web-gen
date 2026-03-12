@@ -677,4 +677,23 @@ describe('stripRecordForIndexing', () => {
     const result = stripRecordForIndexing('v1', record)
     expect(result.options).toBeUndefined()
   })
+
+  it('preserves null placeholders for images without opfsPath to maintain index alignment', () => {
+    const record = {
+      mode: 'slides',
+      prompt: 'slides',
+      timestamp: 4000,
+      images: [
+        { opfsPath: '/images/s1/0.webp', thumbnail: 'base64' },
+        { thumbnail: 'only-thumbnail' },
+        { opfsPath: '/images/s1/2.webp', thumbnail: 'base64' },
+      ],
+    }
+    const result = stripRecordForIndexing('s1', record)
+    expect(result.images).toEqual([
+      { opfsPath: '/images/s1/0.webp' },
+      null,
+      { opfsPath: '/images/s1/2.webp' },
+    ])
+  })
 })

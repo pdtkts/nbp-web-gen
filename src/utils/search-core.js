@@ -367,6 +367,13 @@ export function highlightSnippet(chunkText, query, contextLength = SEARCH_DEFAUL
  */
 export function stripRecordForIndexing(id, record) {
   const stripped = { id, mode: record.mode, prompt: record.prompt, timestamp: record.timestamp }
+
+  // Preserve images opfsPath for multimodal embedding (strip thumbnails/base64 to reduce payload)
+  // Keep null placeholders to maintain original index alignment (important for slides page matching)
+  if (Array.isArray(record.images) && record.images.length > 0) {
+    stripped.images = record.images.map((img) => (img?.opfsPath ? { opfsPath: img.opfsPath } : null))
+  }
+
   if (record.mode === 'slides') {
     const opts = record.options || {}
     stripped.options = {}

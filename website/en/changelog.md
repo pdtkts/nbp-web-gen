@@ -2,6 +2,20 @@
 
 This page documents version updates for Mediator.
 
+## v0.32.0
+
+_2026-03-12_
+
+### New Features
+- **Search**: Upgrade to Gemini Embedding 2 multimodal model, enabling text-to-image and image-to-image search
+- **Search**: Add image match badge to search results, distinguishing text and image hits
+
+### Performance
+- **Search**: Increase Gemini embedding chunk size from 400 to 800 chars for better semantic coherence
+
+### Refactor
+- **Search**: Migrate Gemini API calls to @google/genai SDK for consistency with other modules
+
 ## v0.31.6
 
 _2026-03-05_
@@ -83,63 +97,16 @@ _2026-02-28_
 - **History Restore**: Fix narration script page IDs not matching actual pages after restore
 - **History Restore**: Fix stale dirty flags persisting through localStorage restore
 
-## v0.30.1
-
-_2026-02-27_
-
-### Fixes
-- **PDF Conversion**: Fix worker initialization failure leaving Promise permanently unresolved — now properly resets state to allow retry
-- **Storage**: Fix race conditions in image/video/narration storage by sequentially awaiting calls to prevent concurrent IndexedDB write conflicts
-- **Video Generation**: Fix cancel button not actually passing AbortSignal to polling loop — video generation can now be properly aborted
-- **Video Generation**: Fix AbortController not cleaned up on error — use try/finally to ensure reset on all exit paths
-- **Video Generation**: Fix polling abort listener not properly cleaned up, preventing listener accumulation across iterations
-- **Character Storage**: Fix read path hardcoding `.webp` after write switched to dynamic extensions — add multi-extension resolution
-- **Character Storage**: Add strict MIME type validation, rejecting unsupported image formats early
-- **Character Storage**: Auto-remove stale format variants on save, preventing resolver from returning outdated files
-- **Image Preview**: Fix Blob URL memory leak — use watch + revokeObjectURL cleanup pattern
-- **Inpainting Worker**: Fix `Array.fill()` shared reference bug — use `Array.from()` to create independent objects
-- **OCR**: Fix missing WebP/GIF MIME type detection, aligning with worker mode implementation
-- **OCR**: Fix `isDetecting` ref never being set to true
-- **Theme**: Fix multiple components using non-reactive DOM attribute reads for theme detection — use `useTheme()` composable
-- **Animations**: Fix setTimeout cleanup in HeroTitle and CharacterCarousel — clear all pending timeouts on unmount
-- **AgentMessage**: Fix DOMPurify hook re-registration during HMR — add initialization guard
-- **SearchableSelect**: Replace hardcoded English strings with i18n translation keys
-- **History**: Fix `truncatePrompt` TypeError on null input
-- **Embedding Explorer**: Add watchers for colorBy/hoverText/hoverLength settings to update plot reactively
-- **P2P Sync**: Fix `pendingConversation` not cleared during state reset
-- **LINE Stickers**: Fix Object URL memory leak in error paths
-- **LINE Stickers**: Fix incorrect `revokeObjectURL` calls on data URLs
-- **API Key Manager**: Fix reset timer not cleaned up on scope dispose
-
-### Refactor
-- Remove 19 confirmed dead code items (unused exports, unreachable branches, ineffective CSS classes)
-- Extract binary utilities to shared `binaryUtils.js` module (DRY)
-- Fix filename typo `useCloudfareTurn` → `useCloudflareTurn`
-- Remove glow CSS classes with undefined CSS variables from `style.css`
-- Remove production debug logs from PPTX export
-- Simplify `startViewTransition` conditional in theme switching
-
-### Tests
-- Add 20 unit tests for `binaryUtils.js` (chunked string conversion, MIME detection, Array.from pattern)
-
-## v0.30.0
-
-_2026-02-27_
-
-### New Features
-- **Image Model Selector**: Add global image model selector in settings — choose between Gemini 3 Pro Image (higher quality) and Gemini 3.1 Flash Image (faster speed), persists across sessions
-- **Slide to PPTX**: Add third text removal model "Nano Banana 2" (`gemini-3.1-flash-image-preview`), fast with good quality, requires paid API key
-- **Text Models**: Remove discontinued Gemini 3 Pro text model, keeping Gemini 3 Flash and Gemini 3.1 Pro
-
-### Fixes
-- **Lightbox**: Fix slide narration transcript incorrectly appearing in non-slides mode image previews
-
-### Dependencies
-- `@google/genai` 1.41.0 → 1.43.0
-
 ---
 
 ## Earlier Versions
+
+### v0.30.x - Image Model Selector, Major Bug Fixes & Code Quality
+
+_2026-02-27_
+
+- **v0.30.1** _(02-27)_: Fix 20+ bugs (PDF Worker, storage races, video Abort, character MIME, Blob leaks, OCR detection, etc.), remove 19 dead code items, extract binaryUtils shared module, add 20 unit tests
+- **v0.30.0** _(02-27)_: Image model selector (Pro/Flash toggle), third PPTX text removal model, remove discontinued Gemini 3 Pro text model
 
 ### v0.29.x - Lightbox Transcript Panel & Narration Speed Control
 

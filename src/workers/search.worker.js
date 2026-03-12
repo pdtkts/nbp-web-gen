@@ -374,8 +374,8 @@ async function migrateV3SnapshotIfExists() {
     console.log(`[search.worker] Migrated ${localDocs.length}/${docs.length} docs to snapshot-local (v3→v5)`)
   }
 
-  // Gemini embeddings discarded — chunk size changed from 200→400
-  console.log('[search.worker] Gemini embeddings discarded (chunk params changed cs200→cs400)')
+  // Gemini embeddings discarded — chunk size and schema changed
+  console.log('[search.worker] Gemini embeddings discarded (chunk params changed cs200→cs800; will regenerate under v5 schema)')
 
   await deleteSnapshotKey('docs')
   console.log('[search.worker] v3→v5 migration complete, old snapshot deleted')

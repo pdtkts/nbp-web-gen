@@ -183,6 +183,7 @@ let aiInstanceKey = null // Track which key was used to create the instance
 
 // Transformers.js pipeline for local embedding (lazy loaded)
 let localPipeline = null
+let localModelPromise = null // Shared promise to prevent concurrent loadLocalModel() calls
 
 // Session-level embedding cost tracking (Gemini only)
 let sessionEmbeddingTokens = 0
@@ -837,7 +838,10 @@ async function loadLocalModel() {
  * @returns {Promise<Array<Array<number>>>}
  */
 async function embedLocal(texts, taskType) {
-  if (!localPipeline) await loadLocalModel()
+  if (!localPipeline) {
+    if (!localModelPromise) localModelPromise = loadLocalModel()
+    await localModelPromise
+  }
 
   const prefix = taskType === 'RETRIEVAL_QUERY' ? 'query' : 'passage'
   const prefixed = texts.map((t) => `${prefix}: ${t}`)
@@ -866,6 +870,9 @@ function prepareRecord(record, conversation = null) {
   const parentId = String(record.id)
   const mode = record.mode || ''
   const timestamp = record.timestamp || 0
+  // Capture provider at preparation time to ensure consistency with executeRecord,
+  // even if a switchProvider message is processed while indexing is in-flight
+  const provider = activeProvider
 
   const fullText = extractText(record, conversation)
   if (!fullText || fullText.trim().length === 0) {
@@ -873,11 +880,11 @@ function prepareRecord(record, conversation = null) {
     return null
   }
 
-  const chunkOpts = activeProvider
+  const chunkOpts = provider
     ? {
-        chunkSize: PROVIDER_CONFIG[activeProvider].chunkSize,
-        chunkOverlap: PROVIDER_CONFIG[activeProvider].chunkOverlap,
-        contextWindow: PROVIDER_CONFIG[activeProvider].contextWindow,
+        chunkSize: PROVIDER_CONFIG[provider].chunkSize,
+        chunkOverlap: PROVIDER_CONFIG[provider].chunkOverlap,
+        contextWindow: PROVIDER_CONFIG[provider].contextWindow,
       }
     : {}
 
@@ -899,14 +906,14 @@ function prepareRecord(record, conversation = null) {
     return null
   }
 
-  const dims = getActiveDims()
+  const dims = provider ? PROVIDER_CONFIG[provider].dims : PROVIDER_CONFIG.gemini.dims
   const modeLabel = MODE_SEARCH_LABELS[mode] || mode
 
   // Check cache for text embeddings
   const embeddings = new Array(chunks.length)
   const uncachedIndices = []
   for (let i = 0; i < chunks.length; i++) {
-    const cacheKey = `${activeProvider}:${parentId}:${chunks[i].index}`
+    const cacheKey = `${provider}:${parentId}:${chunks[i].index}`
     const cached = embeddingCache.get(cacheKey)
     if (cached) {
       embeddings[i] = cached
@@ -919,11 +926,11 @@ function prepareRecord(record, conversation = null) {
   let imageMaterial = []
   const cachedImageEmbeddings = new Map() // imgIdx → embedding
   const uncachedImageIndices = []
-  if (activeProvider === 'gemini') {
+  if (provider === 'gemini') {
     imageMaterial = prepareEmbeddingMaterial(record)
     for (let imgIdx = 0; imgIdx < imageMaterial.length; imgIdx++) {
       const { imagePath } = imageMaterial[imgIdx]
-      const imgCacheKey = `${activeProvider}:${parentId}:img:${imagePath || imgIdx}`
+      const imgCacheKey = `${provider}:${parentId}:img:${imagePath || imgIdx}`
       const cached = embeddingCache.get(imgCacheKey)
       if (cached) {
         cachedImageEmbeddings.set(imgIdx, cached)
@@ -934,12 +941,13 @@ function prepareRecord(record, conversation = null) {
   }
 
   // Count API calls needed (for progress reporting)
-  const textApiCalls = activeProvider === 'gemini'
+  const textApiCalls = provider === 'gemini'
     ? Math.ceil(uncachedIndices.length / EMBEDDING_BATCH_API_LIMIT)
     : uncachedIndices.length > 0 ? 1 : 0
   const apiCallCount = textApiCalls + uncachedImageIndices.length
 
   return {
+    provider,
     parentId, mode, timestamp, modeLabel, dims,
     chunks, embeddings, uncachedIndices,
     imageMaterial, cachedImageEmbeddings, uncachedImageIndices,
@@ -957,17 +965,18 @@ function prepareRecord(record, conversation = null) {
  */
 async function executeRecord(prepared, pool, onProgress) {
   const {
+    provider,
     parentId, mode, timestamp, modeLabel, dims,
     chunks, embeddings, uncachedIndices,
     imageMaterial, cachedImageEmbeddings,
   } = prepared
 
   // --- Text embeddings ---
-  if (uncachedIndices.length > 0 && activeProvider) {
+  if (uncachedIndices.length > 0 && provider) {
     const uncachedTexts = uncachedIndices.map((i) => chunks[i].text)
     const embStart = performance.now()
 
-    if (activeProvider === 'gemini') {
+    if (provider === 'gemini') {
       // Split into batches and submit each to the pool
       const batches = []
       for (let i = 0; i < uncachedTexts.length; i += EMBEDDING_BATCH_API_LIMIT) {
@@ -1004,7 +1013,7 @@ async function executeRecord(prepared, pool, onProgress) {
         embeddings[i] = embedding
         const isZero = !embedding.some((v) => v !== 0)
         if (!isZero) {
-          embeddingCache.set(`${activeProvider}:${parentId}:${chunks[i].index}`, embedding)
+          embeddingCache.set(`${provider}:${parentId}:${chunks[i].index}`, embedding)
         }
       }
     } else {
@@ -1017,7 +1026,7 @@ async function executeRecord(prepared, pool, onProgress) {
           embeddings[i] = embedding
           const isZero = !embedding.some((v) => v !== 0)
           if (!isZero) {
-            embeddingCache.set(`${activeProvider}:${parentId}:${chunks[i].index}`, embedding)
+            embeddingCache.set(`${provider}:${parentId}:${chunks[i].index}`, embedding)
           }
         }
       } catch (err) {
@@ -1028,7 +1037,7 @@ async function executeRecord(prepared, pool, onProgress) {
     }
 
     const embTime = Math.round(performance.now() - embStart)
-    console.log(`[search.worker] Embedded ${uncachedTexts.length} text chunks for parent=${parentId} (${embTime}ms, cached=${chunks.length - uncachedIndices.length}, provider=${activeProvider})`)
+    console.log(`[search.worker] Embedded ${uncachedTexts.length} text chunks for parent=${parentId} (${embTime}ms, cached=${chunks.length - uncachedIndices.length}, provider=${provider})`)
   }
 
   // Insert text chunks into Orama (chunkText only — contextText stays out of BM25 index)
@@ -1095,7 +1104,7 @@ async function executeRecord(prepared, pool, onProgress) {
           if (!imageData) return null
           const embedding = await callGeminiMultimodalEmbed(imageData.base64, imageData.mimeType)
           if (embedding && embedding.length === dims) {
-            const imgCacheKey = `${activeProvider}:${parentId}:img:${imagePath || imgIdx}`
+            const imgCacheKey = `${provider}:${parentId}:img:${imagePath || imgIdx}`
             embeddingCache.set(imgCacheKey, embedding)
           }
           return { imgIdx, embedding, imgText, originalIndex }

@@ -53,6 +53,7 @@ const DB_STORE = 'orama-snapshot'
 const DB_VERSION = 3 // v3: full doc snapshot (v2 was embedding-only cache, v1 was unused)
 const EMBEDDING_BATCH_API_LIMIT = 100 // Max texts per batchEmbedContents request
 const MAX_CACHE_ENTRIES = 5000 // In-memory document embedding cache cap (not persisted)
+const MAX_CONCURRENCY = 10 // Max concurrent embedding API requests during indexing
 
 const PROVIDER_CONFIG = {
   gemini: { dims: 768, model: 'gemini-embedding-2-preview', chunkSize: 800, chunkOverlap: 200, contextWindow: 1200 },
@@ -89,6 +90,40 @@ function getProviderConfigVersion(provider) {
   if (!provider) return null
   const cfg = PROVIDER_CONFIG[provider]
   return `cs${cfg.chunkSize}_co${cfg.chunkOverlap}_cw${cfg.contextWindow}_ev${EXTRACTION_VERSION}`
+}
+
+// ============================================================================
+// Concurrency Pool
+// ============================================================================
+
+/**
+ * Limits the number of concurrent async operations.
+ * Used to throttle embedding API calls during indexing.
+ */
+class ConcurrencyPool {
+  constructor(limit) {
+    this.limit = limit
+    this.running = 0
+    this.queue = []
+  }
+
+  run(fn) {
+    return new Promise((resolve, reject) => {
+      const execute = async () => {
+        this.running++
+        try {
+          resolve(await fn())
+        } catch (err) {
+          reject(err)
+        } finally {
+          this.running--
+          if (this.queue.length > 0) this.queue.shift()()
+        }
+      }
+      if (this.running < this.limit) execute()
+      else this.queue.push(execute)
+    })
+  }
 }
 
 // ============================================================================
@@ -148,6 +183,7 @@ let aiInstanceKey = null // Track which key was used to create the instance
 
 // Transformers.js pipeline for local embedding (lazy loaded)
 let localPipeline = null
+let localModelPromise = null // Shared promise to prevent concurrent loadLocalModel() calls
 
 // Session-level embedding cost tracking (Gemini only)
 let sessionEmbeddingTokens = 0
@@ -801,8 +837,20 @@ async function loadLocalModel() {
  * @param {'RETRIEVAL_DOCUMENT'|'RETRIEVAL_QUERY'} taskType
  * @returns {Promise<Array<Array<number>>>}
  */
+async function ensureLocalModelLoaded() {
+  if (!localPipeline) {
+    if (!localModelPromise) {
+      localModelPromise = loadLocalModel().catch((err) => {
+        localModelPromise = null // Allow retry on next call
+        throw err
+      })
+    }
+    await localModelPromise
+  }
+}
+
 async function embedLocal(texts, taskType) {
-  if (!localPipeline) await loadLocalModel()
+  await ensureLocalModelLoaded()
 
   const prefix = taskType === 'RETRIEVAL_QUERY' ? 'query' : 'passage'
   const prefixed = texts.map((t) => `${prefix}: ${t}`)
@@ -811,41 +859,7 @@ async function embedLocal(texts, taskType) {
 }
 
 // ============================================================================
-// Embedding Router
-// ============================================================================
-
-/**
- * Generate embeddings for an array of texts via the active provider.
- * Routes to Gemini API or local model based on activeProvider.
- * @param {string[]} texts
- * @param {'RETRIEVAL_DOCUMENT'|'RETRIEVAL_QUERY'} taskType
- * @returns {Promise<Array<Array<number>>>}
- */
-async function embed(texts, taskType = 'RETRIEVAL_DOCUMENT') {
-  if (texts.length === 0) return []
-  if (!activeProvider) {
-    console.warn('[search.worker] embed() called without active provider — returning empty embeddings')
-    return []
-  }
-
-  if (activeProvider === 'gemini') {
-    if (!getApiKey()) return []
-    // Split into API batch limits
-    const allEmbeddings = []
-    for (let i = 0; i < texts.length; i += EMBEDDING_BATCH_API_LIMIT) {
-      const batch = texts.slice(i, i + EMBEDDING_BATCH_API_LIMIT)
-      const batchResult = await callGeminiBatchEmbed(batch, taskType)
-      allEmbeddings.push(...batchResult)
-    }
-    return allEmbeddings
-  }
-
-  // local provider
-  return embedLocal(texts, taskType)
-}
-
-// ============================================================================
-// Indexing (cache-aware)
+// Indexing (cache-aware, concurrent)
 // ============================================================================
 
 /**
@@ -857,27 +871,29 @@ function getActiveDims() {
 }
 
 /**
- * Index a single history record into Orama.
- * Checks embedding cache first — only generates new embeddings for uncached chunks.
+ * Prepare a record for indexing (synchronous, no API calls).
+ * Extracts text, chunks, checks cache, and counts API calls needed.
+ * @returns {Object|null} Preparation data, or null if record should be skipped.
  */
-async function indexRecord(record, conversation = null) {
+function prepareRecord(record, conversation = null) {
   const parentId = String(record.id)
   const mode = record.mode || ''
   const timestamp = record.timestamp || 0
+  // Capture provider at preparation time to ensure consistency with executeRecord,
+  // even if a switchProvider message is processed while indexing is in-flight
+  const provider = activeProvider
 
-  // Extract and chunk text
   const fullText = extractText(record, conversation)
   if (!fullText || fullText.trim().length === 0) {
     console.warn(`[search.worker] Skipping record ${parentId} (mode=${mode}): extractText returned empty (conversation=${!!conversation})`)
-    return 0
+    return null
   }
 
-  // Use provider-specific chunk parameters (or SEARCH_DEFAULTS fallback when no provider)
-  const chunkOpts = activeProvider
+  const chunkOpts = provider
     ? {
-        chunkSize: PROVIDER_CONFIG[activeProvider].chunkSize,
-        chunkOverlap: PROVIDER_CONFIG[activeProvider].chunkOverlap,
-        contextWindow: PROVIDER_CONFIG[activeProvider].contextWindow,
+        chunkSize: PROVIDER_CONFIG[provider].chunkSize,
+        chunkOverlap: PROVIDER_CONFIG[provider].chunkOverlap,
+        contextWindow: PROVIDER_CONFIG[provider].contextWindow,
       }
     : {}
 
@@ -887,7 +903,6 @@ async function indexRecord(record, conversation = null) {
     if (allMsgs.length > 0) {
       chunks = allMsgs.map((m, i) => ({ text: m.text, contextText: m.text, index: i }))
     } else {
-      // Conversation exists but no extractable text (e.g., image-only) — fall back to fullText
       console.warn(`[search.worker] Agent record ${parentId}: conversation has no text messages, falling back to prompt`)
       chunks = chunkText(fullText, chunkOpts)
     }
@@ -897,17 +912,17 @@ async function indexRecord(record, conversation = null) {
 
   if (chunks.length === 0) {
     console.warn(`[search.worker] Skipping record ${parentId} (mode=${mode}): no chunks produced from text (len=${fullText?.length || 0})`)
-    return 0
+    return null
   }
 
-  const dims = getActiveDims()
+  const dims = provider ? PROVIDER_CONFIG[provider].dims : PROVIDER_CONFIG.gemini.dims
+  const modeLabel = MODE_SEARCH_LABELS[mode] || mode
 
-  // Check cache for existing embeddings
+  // Check cache for text embeddings
   const embeddings = new Array(chunks.length)
   const uncachedIndices = []
-
   for (let i = 0; i < chunks.length; i++) {
-    const cacheKey = `${activeProvider}:${parentId}:${chunks[i].index}`
+    const cacheKey = `${provider}:${parentId}:${chunks[i].index}`
     const cached = embeddingCache.get(cacheKey)
     if (cached) {
       embeddings[i] = cached
@@ -916,33 +931,125 @@ async function indexRecord(record, conversation = null) {
     }
   }
 
-  // Generate embeddings only for uncached chunks
-  if (uncachedIndices.length > 0) {
-    const uncachedTexts = uncachedIndices.map((i) => chunks[i].text)
-    let newEmbeddings = []
-    const embStart = performance.now()
-    try {
-      newEmbeddings = await embed(uncachedTexts, 'RETRIEVAL_DOCUMENT')
-    } catch (err) {
-      console.warn('[search.worker] Embedding failed for uncached chunks:', err.message)
-    }
-    const embTime = Math.round(performance.now() - embStart)
-    console.log(`[search.worker] Embedded ${uncachedTexts.length} chunks for parent=${parentId} (${embTime}ms, cached=${chunks.length - uncachedIndices.length}, provider=${activeProvider})`)
-    for (let j = 0; j < uncachedIndices.length; j++) {
-      const i = uncachedIndices[j]
-      const embedding = newEmbeddings[j] || new Array(dims).fill(0)
-      embeddings[i] = embedding
-      // Only cache non-zero embeddings — zero vectors indicate API failure
-      // and should be retried on next indexing attempt
-      const isZero = !embedding.some((v) => v !== 0)
-      if (!isZero) {
-        embeddingCache.set(`${activeProvider}:${parentId}:${chunks[i].index}`, embedding)
+  // Prepare image material and check cache (Gemini only)
+  let imageMaterial = []
+  const cachedImageEmbeddings = new Map() // imgIdx → embedding
+  const uncachedImageIndices = []
+  if (provider === 'gemini') {
+    imageMaterial = prepareEmbeddingMaterial(record)
+    for (let imgIdx = 0; imgIdx < imageMaterial.length; imgIdx++) {
+      const { imagePath } = imageMaterial[imgIdx]
+      const imgCacheKey = `${provider}:${parentId}:img:${imagePath || imgIdx}`
+      const cached = embeddingCache.get(imgCacheKey)
+      if (cached) {
+        cachedImageEmbeddings.set(imgIdx, cached)
+      } else {
+        uncachedImageIndices.push(imgIdx)
       }
     }
   }
 
+  // Count API calls needed (for progress reporting)
+  const textApiCalls = !provider ? 0
+    : provider === 'gemini' ? Math.ceil(uncachedIndices.length / EMBEDDING_BATCH_API_LIMIT)
+      : uncachedIndices.length > 0 ? 1 : 0
+  const apiCallCount = textApiCalls + uncachedImageIndices.length
+
+  return {
+    provider,
+    parentId, mode, timestamp, modeLabel, dims,
+    chunks, embeddings, uncachedIndices,
+    imageMaterial, cachedImageEmbeddings, uncachedImageIndices,
+    apiCallCount,
+  }
+}
+
+/**
+ * Execute embedding API calls for a prepared record and insert into Orama.
+ * API calls are submitted through the concurrency pool for parallel execution.
+ * @param {Object} prepared - From prepareRecord()
+ * @param {ConcurrencyPool} pool - Concurrency limiter
+ * @param {Function} onProgress - Called after each API call completes
+ * @returns {Promise<number>} Total docs inserted
+ */
+async function executeRecord(prepared, pool, onProgress) {
+  const {
+    provider,
+    parentId, mode, timestamp, modeLabel, dims,
+    chunks, embeddings, uncachedIndices,
+    imageMaterial, cachedImageEmbeddings,
+  } = prepared
+
+  // --- Text embeddings ---
+  if (uncachedIndices.length > 0 && provider) {
+    const uncachedTexts = uncachedIndices.map((i) => chunks[i].text)
+    const embStart = performance.now()
+
+    if (provider === 'gemini') {
+      // Split into batches and submit each to the pool
+      const batches = []
+      for (let i = 0; i < uncachedTexts.length; i += EMBEDDING_BATCH_API_LIMIT) {
+        batches.push({ startIdx: i, texts: uncachedTexts.slice(i, i + EMBEDDING_BATCH_API_LIMIT) })
+      }
+
+      const batchPromises = batches.map((batch) =>
+        pool.run(async () => {
+          try {
+            const result = await callGeminiBatchEmbed(batch.texts, 'RETRIEVAL_DOCUMENT')
+            return { startIdx: batch.startIdx, result }
+          } catch (err) {
+            console.warn('[search.worker] Batch embed failed:', err.message)
+            return { startIdx: batch.startIdx, result: [] }
+          } finally {
+            onProgress()
+          }
+        }),
+      )
+
+      const batchResults = await Promise.all(batchPromises)
+
+      // Reassemble embeddings in order
+      const allNewEmbeddings = new Array(uncachedTexts.length)
+      for (const { startIdx, result } of batchResults) {
+        for (let k = 0; k < result.length; k++) {
+          allNewEmbeddings[startIdx + k] = result[k]
+        }
+      }
+
+      for (let j = 0; j < uncachedIndices.length; j++) {
+        const i = uncachedIndices[j]
+        const embedding = allNewEmbeddings[j] || new Array(dims).fill(0)
+        embeddings[i] = embedding
+        const isZero = !embedding.some((v) => v !== 0)
+        if (!isZero) {
+          embeddingCache.set(`${provider}:${parentId}:${chunks[i].index}`, embedding)
+        }
+      }
+    } else {
+      // Local provider: single call for all texts, throttled through pool
+      try {
+        const newEmbeddings = await pool.run(() => embedLocal(uncachedTexts, 'RETRIEVAL_DOCUMENT'))
+        for (let j = 0; j < uncachedIndices.length; j++) {
+          const i = uncachedIndices[j]
+          const embedding = newEmbeddings[j] || new Array(dims).fill(0)
+          embeddings[i] = embedding
+          const isZero = !embedding.some((v) => v !== 0)
+          if (!isZero) {
+            embeddingCache.set(`${provider}:${parentId}:${chunks[i].index}`, embedding)
+          }
+        }
+      } catch (err) {
+        console.warn('[search.worker] Local embedding failed:', err.message)
+      } finally {
+        onProgress()
+      }
+    }
+
+    const embTime = Math.round(performance.now() - embStart)
+    console.log(`[search.worker] Embedded ${uncachedTexts.length} text chunks for parent=${parentId} (${embTime}ms, cached=${chunks.length - uncachedIndices.length}, provider=${provider})`)
+  }
+
   // Insert text chunks into Orama (chunkText only — contextText stays out of BM25 index)
-  const modeLabel = MODE_SEARCH_LABELS[mode] || mode
   const textDocs = chunks.map((chunk, i) => ({
     parentId,
     chunkIndex: chunk.index,
@@ -958,14 +1065,12 @@ async function indexRecord(record, conversation = null) {
   const insertedIds = await insertMultiple(oramaDb, textDocs)
   indexedParentIds.add(parentId)
 
-  // Track Orama internal doc IDs for reliable removal
   if (!parentDocIds.has(parentId)) parentDocIds.set(parentId, new Set())
   const docIdSet = parentDocIds.get(parentId)
   for (const docId of insertedIds) {
     docIdSet.add(docId)
   }
 
-  // Store contextText in memory map
   for (let i = 0; i < chunks.length; i++) {
     const key = `${parentId}:${chunks[i].index}`
     contextTextMap.set(key, chunks[i].contextText)
@@ -991,77 +1096,79 @@ async function indexRecord(record, conversation = null) {
   let totalDocs = textDocs.length
 
   // ---- Multimodal image chunks (Gemini provider only) ----
-  if (activeProvider === 'gemini') {
-    const imageMaterial = prepareEmbeddingMaterial(record)
-    if (imageMaterial.length > 0) {
-      const imageDocs = []
-      for (let imgIdx = 0; imgIdx < imageMaterial.length; imgIdx++) {
-        const { text: imgText, imagePath, originalIndex } = imageMaterial[imgIdx]
-        const imgCacheKey = `${activeProvider}:${parentId}:img:${imagePath || imgIdx}`
-        const cachedEmb = embeddingCache.get(imgCacheKey)
+  if (imageMaterial.length > 0) {
+    // Submit all uncached images to the pool concurrently
+    const imagePromises = imageMaterial.map((item, imgIdx) => {
+      const { text: imgText, imagePath, originalIndex } = item
 
-        let imgEmbedding
-        if (cachedEmb) {
-          imgEmbedding = cachedEmb
-        } else {
-          try {
-            const imageData = await loadImageAsBase64(imagePath)
-            if (imageData) {
-              imgEmbedding = await callGeminiMultimodalEmbed(imageData.base64, imageData.mimeType)
-              if (imgEmbedding && imgEmbedding.length === dims) {
-                embeddingCache.set(imgCacheKey, imgEmbedding)
-              }
-            }
-          } catch (err) {
-            console.warn(`[search.worker] Multimodal embed failed for ${imagePath}:`, err.message)
+      // Use cached embedding directly (no API call)
+      if (cachedImageEmbeddings.has(imgIdx)) {
+        return Promise.resolve({ imgIdx, embedding: cachedImageEmbeddings.get(imgIdx), imgText, originalIndex })
+      }
+
+      // Submit uncached image to pool
+      return pool.run(async () => {
+        try {
+          const imageData = await loadImageAsBase64(imagePath)
+          if (!imageData) return null
+          const embedding = await callGeminiMultimodalEmbed(imageData.base64, imageData.mimeType)
+          if (embedding && embedding.length === dims) {
+            const imgCacheKey = `${provider}:${parentId}:img:${imagePath || imgIdx}`
+            embeddingCache.set(imgCacheKey, embedding)
           }
+          return { imgIdx, embedding, imgText, originalIndex }
+        } catch (err) {
+          console.warn(`[search.worker] Multimodal embed failed for ${imagePath}:`, err.message)
+          return null
+        } finally {
+          onProgress()
         }
+      })
+    })
 
-        // Skip image chunk if embedding failed (don't insert zero-vectors that pollute search results)
-        if (!imgEmbedding || imgEmbedding.length !== dims) continue
+    const imageResults = await Promise.all(imagePromises)
 
-        const imgChunkIndex = chunks.length + imgIdx
-        const doc = {
-          parentId,
-          chunkIndex: imgChunkIndex,
-          chunkText: imgText || `[image ${originalIndex}]`,
+    // Collect valid results and insert into Orama
+    const imageDocs = []
+    for (const result of imageResults) {
+      if (!result || !result.embedding || result.embedding.length !== dims) continue
+
+      const imgChunkIndex = chunks.length + result.imgIdx
+      imageDocs.push({
+        parentId,
+        chunkIndex: imgChunkIndex,
+        chunkText: result.imgText || `[image ${result.originalIndex}]`,
+        chunkType: 'image',
+        imageIndex: result.originalIndex,
+        mode,
+        modeLabel,
+        timestamp,
+        embedding: result.embedding,
+      })
+      contextTextMap.set(`${parentId}:${imgChunkIndex}`, result.imgText || `[image ${result.originalIndex}]`)
+    }
+
+    if (imageDocs.length > 0) {
+      const imgInsertedIds = await insertMultiple(oramaDb, imageDocs)
+      for (const docId of imgInsertedIds) {
+        docIdSet.add(docId)
+      }
+      for (const doc of imageDocs) {
+        snapshotDocs.push({
+          parentId: doc.parentId,
+          chunkIndex: doc.chunkIndex,
+          chunkText: doc.chunkText,
           chunkType: 'image',
-          imageIndex: originalIndex,
-          mode,
-          modeLabel,
-          timestamp,
-          embedding: imgEmbedding,
-        }
-        imageDocs.push(doc)
-
-        // Store context for image chunks (the paired text)
-        const ctxKey = `${parentId}:${imgChunkIndex}`
-        contextTextMap.set(ctxKey, imgText || `[image ${originalIndex}]`)
+          imageIndex: doc.imageIndex,
+          contextText: doc.chunkText,
+          mode: doc.mode,
+          modeLabel: doc.modeLabel,
+          timestamp: doc.timestamp,
+          embedding: doc.embedding,
+        })
       }
-
-      if (imageDocs.length > 0) {
-        const imgInsertedIds = await insertMultiple(oramaDb, imageDocs)
-        for (const docId of imgInsertedIds) {
-          docIdSet.add(docId)
-        }
-        // Add to snapshot
-        for (let i = 0; i < imageDocs.length; i++) {
-          snapshotDocs.push({
-            parentId: imageDocs[i].parentId,
-            chunkIndex: imageDocs[i].chunkIndex,
-            chunkText: imageDocs[i].chunkText,
-            chunkType: 'image',
-            imageIndex: imageDocs[i].imageIndex,
-            contextText: imageDocs[i].chunkText,
-            mode: imageDocs[i].mode,
-            modeLabel: imageDocs[i].modeLabel,
-            timestamp: imageDocs[i].timestamp,
-            embedding: imageDocs[i].embedding,
-          })
-        }
-        totalDocs += imageDocs.length
-        console.log(`[search.worker] Indexed ${imageDocs.length} image chunks for parent=${parentId}`)
-      }
+      totalDocs += imageDocs.length
+      console.log(`[search.worker] Indexed ${imageDocs.length} image chunks for parent=${parentId}`)
     }
   }
 
@@ -1455,8 +1562,8 @@ async function switchProvider(newProvider, requestId) {
   }
 
   // Load local model if needed
-  if (newProvider === 'local' && !localPipeline) {
-    await loadLocalModel()
+  if (newProvider === 'local') {
+    await ensureLocalModelLoaded()
   }
 
   console.log(`[search.worker] Switched to provider=${newProvider}, dims=${dims}, indexed=${indexedParentIds.size}`)
@@ -1570,8 +1677,8 @@ async function initialize(keys = {}) {
     }
 
     // 5. Load local model if needed
-    if (activeProvider === 'local' && !localPipeline) {
-      await loadLocalModel()
+    if (activeProvider === 'local') {
+      await ensureLocalModelLoaded()
     } else {
       self.postMessage({ type: 'modelProgress', stage: 'ready', value: 100, message: 'Ready' })
     }
@@ -1634,36 +1741,53 @@ self.addEventListener('message', async (event) => {
 
       case 'index': {
         const { records } = event.data
-        let totalChunks = 0
+        const pool = new ConcurrencyPool(MAX_CONCURRENCY)
 
-        // Send initial progress so UI never shows 0/0
-        self.postMessage({
-          type: 'progress', requestId,
-          value: 0, total: records.length,
-          message: `Indexing 0/${records.length}`,
-        })
+        // Phase 1: Prepare all records (synchronous, no API calls)
+        const prepared = []
+        for (const item of records) {
+          const p = prepareRecord(item.record, item.conversation || null)
+          if (p) prepared.push(p)
+        }
 
-        for (let i = 0; i < records.length; i++) {
-          const item = records[i]
-          try {
-            const count = await indexRecord(item.record, item.conversation || null)
-            totalChunks += count
-          } catch (indexErr) {
-            console.error(`[search.worker] indexRecord FAILED for id=${item.record?.id} mode=${item.record?.mode}:`, indexErr)
-          }
+        // Count total API operations for progress reporting
+        const totalOps = prepared.reduce((sum, p) => sum + p.apiCallCount, 0)
+        let completedOps = 0
 
-          // Report progress per-record (not per-batch) for responsive UI
-          const processed = i + 1
+        if (totalOps > 0) {
           self.postMessage({
-            type: 'progress',
-            requestId,
-            value: processed,
-            total: records.length,
-            message: `Indexed ${processed}/${records.length}`,
+            type: 'progress', requestId,
+            value: 0, total: totalOps,
+            message: `Embedding 0/${totalOps}`,
           })
         }
 
+        const onProgress = () => {
+          completedOps++
+          self.postMessage({
+            type: 'progress', requestId,
+            value: completedOps, total: totalOps,
+            message: `Embedding ${completedOps}/${totalOps}`,
+          })
+        }
+
+        // Phase 2: Execute all records concurrently through the pool
+        const results = await Promise.allSettled(
+          prepared.map((p) => executeRecord(p, pool, onProgress)),
+        )
+
+        let totalChunks = 0
+        for (const result of results) {
+          if (result.status === 'fulfilled') {
+            totalChunks += result.value
+          } else {
+            console.error('[search.worker] executeRecord FAILED:', result.reason)
+          }
+        }
+
         self.postMessage({ type: 'indexed', requestId, count: totalChunks, parentCount: indexedParentIds.size })
+        // Reset progress state so stale values don't persist across runs
+        self.postMessage({ type: 'progress', requestId, value: 0, total: 0, message: '' })
         break
       }
 

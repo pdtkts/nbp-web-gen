@@ -2,6 +2,18 @@
 
 This page documents version updates for Mediator.
 
+## v0.32.1
+
+_2026-03-13_
+
+### Performance
+- **Search**: Parallelize embedding API calls (up to 10 concurrent requests), significantly accelerating indexing for slides and other multi-image records
+
+### Fixes
+- **Search**: Fix image index misalignment in multimodal embedding pipeline
+- **Search**: Fix provider race conditions and concurrent local model loading in parallel embedding
+- **Search**: Update indexing progress per API call instead of per record
+
 ## v0.32.0
 
 _2026-03-12_

@@ -837,7 +837,7 @@ async function loadLocalModel() {
  * @param {'RETRIEVAL_DOCUMENT'|'RETRIEVAL_QUERY'} taskType
  * @returns {Promise<Array<Array<number>>>}
  */
-async function embedLocal(texts, taskType) {
+async function ensureLocalModelLoaded() {
   if (!localPipeline) {
     if (!localModelPromise) {
       localModelPromise = loadLocalModel().catch((err) => {
@@ -847,6 +847,10 @@ async function embedLocal(texts, taskType) {
     }
     await localModelPromise
   }
+}
+
+async function embedLocal(texts, taskType) {
+  await ensureLocalModelLoaded()
 
   const prefix = taskType === 'RETRIEVAL_QUERY' ? 'query' : 'passage'
   const prefixed = texts.map((t) => `${prefix}: ${t}`)
@@ -946,7 +950,6 @@ function prepareRecord(record, conversation = null) {
   }
 
   // Count API calls needed (for progress reporting)
-   
   const textApiCalls = !provider ? 0
     : provider === 'gemini' ? Math.ceil(uncachedIndices.length / EMBEDDING_BATCH_API_LIMIT)
       : uncachedIndices.length > 0 ? 1 : 0
@@ -1559,8 +1562,8 @@ async function switchProvider(newProvider, requestId) {
   }
 
   // Load local model if needed
-  if (newProvider === 'local' && !localPipeline) {
-    await loadLocalModel()
+  if (newProvider === 'local') {
+    await ensureLocalModelLoaded()
   }
 
   console.log(`[search.worker] Switched to provider=${newProvider}, dims=${dims}, indexed=${indexedParentIds.size}`)
@@ -1674,8 +1677,8 @@ async function initialize(keys = {}) {
     }
 
     // 5. Load local model if needed
-    if (activeProvider === 'local' && !localPipeline) {
-      await loadLocalModel()
+    if (activeProvider === 'local') {
+      await ensureLocalModelLoaded()
     } else {
       self.postMessage({ type: 'modelProgress', stage: 'ready', value: 100, message: 'Ready' })
     }

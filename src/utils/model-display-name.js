@@ -53,7 +53,10 @@ export function getModelShortName(codeName) {
  * @returns {string|null} Short display name or null
  */
 export function getHistoryModelName(mode, options) {
-  if (mode === 'agent') return '3 Flash'
+  if (mode === 'agent') {
+    const code = options?.model
+    return code ? (getModelShortName(code) || code) : '3 Flash'
+  }
 
   // Video mode
   if (mode === 'video') {

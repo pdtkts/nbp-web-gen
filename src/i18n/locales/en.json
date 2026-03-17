@@ -75,8 +75,12 @@
     "freeTierSubtitle": "For text processing features (optional)",
     "freeTierPlaceholder": "Enter your Free Tier API Key...",
     "addFreeTier": "Add Free Tier Key",
-    "freeTierHint": "Free Tier key can be used for character extraction, slide style analysis, and other text processing. When quota is exhausted, it automatically falls back to the main key.",
+    "freeTierHint": "Free Tier key can be used for character extraction, slide style analysis, and other text processing features.",
     "freeTierPrivacyWarning": "Google may use Free Tier inputs and outputs to improve its products and models. If you have privacy concerns, use only the paid API Key above.",
+    "textModelLabel": "Text Processing Model",
+    "textModelHint": "Used for style analysis, narration, character extraction, Agent, and other text features",
+    "textModelCustom": "Custom model...",
+    "textModelCustomPlaceholder": "Enter model name",
     "showKey": "Show API Key",
     "hideKey": "Hide API Key",
     "customEndpointTitle": "Custom API Endpoint",
@@ -85,7 +89,11 @@
     "customEndpointHint": "All Gemini API requests will be routed through this endpoint. Leave empty to use Google's official API directly.",
     "setCustomEndpoint": "Set Custom Endpoint",
     "customEndpointSave": "Save Endpoint",
-    "customEndpointHttpsOnly": "Only HTTPS URLs are supported for security."
+    "customEndpointHttpsOnly": "Only HTTPS URLs are supported for security.",
+    "primaryEndpointTitle": "Custom API Endpoint",
+    "primaryEndpointHint": "API endpoint for image/video generation",
+    "freeTierEndpointTitle": "Custom API Endpoint",
+    "freeTierEndpointHint": "API endpoint for text processing features"
   },
   "apiKeyModal": {
     "title": "Set Up Gemini Keys",

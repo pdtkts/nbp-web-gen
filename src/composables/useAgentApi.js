@@ -5,20 +5,20 @@ import { useGeneratorStore } from '@/stores/generator'
 import { buildSdkOptions } from '@/utils/build-sdk-options'
 import { fetchFileUriAsBase64 } from '@/utils/fetch-file-uri-as-base64'
 
-// Agent mode requires gemini-3-flash-preview specifically (codeExecution tool support)
-const AGENT_MODEL = 'gemini-3-flash-preview'
+// Default agent model (fallback when no user selection)
+const AGENT_MODEL_FALLBACK = 'gemini-3-flash-preview'
 
 /**
  * Composable for Google Gemini Agentic Vision API
  *
- * Uses gemini-3-flash-preview (hardcoded) with:
+ * Uses user-selected text model (or gemini-3-flash-preview fallback) with:
  * - tools: [{ codeExecution: {} }] for code execution capability
  * - thinkingConfig: { includeThoughts: true } for reasoning visibility
  *
  * Output types: text, thought, executableCode, codeExecutionResult, inlineData
  */
 export function useAgentApi() {
-  const { callWithFallback, getCustomBaseUrl } = useApiKeyManager()
+  const { callWithFallback, getFreeTierBaseUrl, getFreeTierModel } = useApiKeyManager()
   const store = useGeneratorStore()
 
   const isStreaming = ref(false)
@@ -190,8 +190,8 @@ export function useAgentApi() {
   }
 
   /**
-   * Send a message with automatic retry/fallback
-   * Uses callWithFallback to handle API key fallback and retry behavior
+   * Send a message with streaming
+   * Uses callWithFallback (compat name) for direct key-based API calls
    * @param {string} text - User text input
    * @param {Array} images - Array of { data: base64, mimeType } objects
    * @param {Object} callbacks - { onPart, onComplete, onError, conversation }
@@ -202,7 +202,7 @@ export function useAgentApi() {
     const { onPart, onComplete, onError, conversation } = callbacks
 
     return await callWithFallback(async (apiKey) => {
-      const ai = new GoogleGenAI(buildSdkOptions(apiKey, getCustomBaseUrl()))
+      const ai = new GoogleGenAI(buildSdkOptions(apiKey, getFreeTierBaseUrl()))
       const contextDepth = store.agentOptions.contextDepth || 5
 
       isStreaming.value = true
@@ -214,7 +214,7 @@ export function useAgentApi() {
         const history = buildChatHistory(conversationForHistory, contextDepth, includeImages)
 
         const chat = ai.chats.create({
-          model: AGENT_MODEL,
+          model: getFreeTierModel() || AGENT_MODEL_FALLBACK,
           history,
           config: {
             tools: [{ codeExecution: {} }],

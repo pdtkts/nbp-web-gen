@@ -56,11 +56,11 @@ const EXTRACTION_SCHEMA = {
 export function useCharacterExtraction() {
   const isExtracting = ref(false)
   const extractionError = ref(null)
-  const { callWithFallback, hasApiKeyFor, getCustomBaseUrl } = useApiKeyManager()
+  const { callWithFallback, hasApiKeyFor, getFreeTierBaseUrl, getFreeTierModel } = useApiKeyManager()
 
   /**
    * Extract character features from an image
-   * Uses global API key management with automatic fallback (Free Tier → Paid)
+   * Uses global API key management (Free Tier for text usage, no paid fallback)
    * @param {Object} options
    * @param {string} options.imageData - Base64 encoded image data
    * @param {string} options.mimeType - Image mime type
@@ -70,7 +70,7 @@ export function useCharacterExtraction() {
   const extractCharacter = async ({
     imageData,
     mimeType = 'image/png',
-    model = DEFAULT_TEXT_MODEL,
+    model = getFreeTierModel() || DEFAULT_TEXT_MODEL,
   }) => {
     if (!hasApiKeyFor('text')) {
       throw new Error(t('errors.apiKeyNotSet'))
@@ -84,9 +84,9 @@ export function useCharacterExtraction() {
     extractionError.value = null
 
     try {
-      // Use callWithFallback for automatic Free Tier → Paid fallback
+      // Use callWithFallback (compat name): direct Free Tier call
       const response = await callWithFallback(async (apiKey) => {
-        const ai = new GoogleGenAI(buildSdkOptions(apiKey, getCustomBaseUrl()))
+        const ai = new GoogleGenAI(buildSdkOptions(apiKey, getFreeTierBaseUrl()))
 
         return await ai.models.generateContent({
           model,

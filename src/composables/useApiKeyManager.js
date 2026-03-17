@@ -1,4 +1,4 @@
-import { ref, computed, onScopeDispose } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useLocalStorage } from './useLocalStorage'
 
@@ -7,11 +7,7 @@ import { useLocalStorage } from './useLocalStorage'
  *
  * 本專案使用雙 API Key 架構：
  * - 付費金鑰 (Primary): 用於圖片/影片生成，強制使用
- * - Free Tier 金鑰 (Secondary): 用於文字處理，優先使用
- *
- * Usage Types:
- * - 'image': 圖片/影片生成，強制使用付費金鑰
- * - 'text': 文字處理，優先 Free Tier，免費額度用罄時 fallback 到付費
+ * - Free Tier 金鑰 (Secondary): 用於文字處理，僅使用 Free Tier（不自動 fallback）
  */
 export function useApiKeyManager() {
   const {
@@ -23,14 +19,12 @@ export function useApiKeyManager() {
     hasFreeTierApiKey,
     getCustomBaseUrl,
     setCustomBaseUrl,
+    getFreeTierBaseUrl,
+    setFreeTierBaseUrl,
+    getFreeTierModel,
+    setFreeTierModel,
   } = useLocalStorage()
   const { t } = useI18n()
-
-  // 追蹤 Free Tier 額度狀態（session-level）
-  const freeTierExhausted = ref(false)
-
-  // Timeout ID for auto-reset (to prevent memory leaks)
-  let resetTimeoutId = null
 
   // 追蹤當前正在使用的 key 類型（用於 UI 顯示）
   const lastUsedKeyType = ref(null) // 'paid' | 'freeTier' | null
@@ -42,23 +36,12 @@ export function useApiKeyManager() {
    */
   const getApiKey = (usage = 'image') => {
     if (usage === 'image') {
-      // 圖片/影片生成：強制使用付費金鑰
       lastUsedKeyType.value = 'paid'
       return getPaidApiKey()
     }
 
-    // 文字處理：優先 Free Tier
-    if (!freeTierExhausted.value) {
-      const freeTierKey = getFreeTierApiKey()
-      if (freeTierKey) {
-        lastUsedKeyType.value = 'freeTier'
-        return freeTierKey
-      }
-    }
-
-    // Fallback 到付費金鑰
-    lastUsedKeyType.value = 'paid'
-    return getPaidApiKey()
+    lastUsedKeyType.value = 'freeTier'
+    return getFreeTierApiKey()
   }
 
   /**
@@ -70,76 +53,21 @@ export function useApiKeyManager() {
     if (usage === 'image') {
       return hasPaidApiKey()
     }
-    // 文字處理：Free Tier 或付費金鑰任一可用即可
-    return hasFreeTierApiKey() || hasPaidApiKey()
+    return hasFreeTierApiKey()
   }
 
   /**
-   * 標記 Free Tier 額度已耗盡
-   * 在收到 429 或額度相關錯誤時調用
-   */
-  const markFreeTierExhausted = () => {
-    freeTierExhausted.value = true
-    // Clear any existing timeout to avoid duplicates
-    if (resetTimeoutId) {
-      clearTimeout(resetTimeoutId)
-    }
-    // 1 小時後自動重試（Free Tier 通常每分鐘/每小時重置）
-    resetTimeoutId = setTimeout(() => {
-      freeTierExhausted.value = false
-      resetTimeoutId = null
-    }, 60 * 60 * 1000)
-  }
-
-  /**
-   * 重置 Free Tier 額度狀態（手動重試時使用）
-   */
-  const resetFreeTierStatus = () => {
-    if (resetTimeoutId) {
-      clearTimeout(resetTimeoutId)
-      resetTimeoutId = null
-    }
-    freeTierExhausted.value = false
-  }
-
-  // Clean up timeout on scope dispose to prevent memory leaks
-  onScopeDispose(() => {
-    if (resetTimeoutId) {
-      clearTimeout(resetTimeoutId)
-      resetTimeoutId = null
-    }
-  })
-
-  /**
-   * 帶有自動 fallback 的 API 調用包裝器
+   * 保留舊名稱以維持相容性：不再做 fallback，只做直接呼叫
    * @param {(apiKey: string) => Promise<T>} apiCall - API 調用函數
    * @param {'image' | 'text'} usage - 使用情境
    * @returns {Promise<T>}
    */
   const callWithFallback = async (apiCall, usage = 'text') => {
-    const primaryKey = getApiKey(usage)
-
-    if (!primaryKey) {
+    const apiKey = getApiKey(usage)
+    if (!apiKey) {
       throw new Error(t('errors.apiKeyNotSet'))
     }
-
-    try {
-      return await apiCall(primaryKey)
-    } catch (error) {
-      // 檢查是否為額度不足錯誤，且當前使用的是 Free Tier
-      if (isQuotaError(error) && usage === 'text' && lastUsedKeyType.value === 'freeTier') {
-        markFreeTierExhausted()
-
-        // 嘗試使用付費金鑰
-        const fallbackKey = getPaidApiKey()
-        if (fallbackKey) {
-          lastUsedKeyType.value = 'paid'
-          console.info('[API] Free Tier 免費額度用罄，自動切換到付費金鑰')
-          return await apiCall(fallbackKey)
-        }
-      }
-      throw error
-    }
+    return await apiCall(apiKey)
   }
 
   return {
@@ -155,17 +83,20 @@ export function useApiKeyManager() {
     setFreeTierApiKey,
     hasFreeTierApiKey,
 
-    // 額度管理
-    markFreeTierExhausted,
-    resetFreeTierStatus,
-    freeTierExhausted: computed(() => freeTierExhausted.value),
-
-    // 帶 fallback 的調用
+    // 帶相容名稱的直接調用
     callWithFallback,
 
-    // Custom Base URL (API proxy)
+    // Primary Base URL (API proxy)
     getCustomBaseUrl,
     setCustomBaseUrl,
+
+    // Free Tier Base URL (text API proxy)
+    getFreeTierBaseUrl,
+    setFreeTierBaseUrl,
+
+    // Free Tier Model selection
+    getFreeTierModel,
+    setFreeTierModel,
 
     // 狀態（用於 UI 顯示）
     lastUsedKeyType: computed(() => lastUsedKeyType.value),

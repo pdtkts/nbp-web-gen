@@ -69,7 +69,7 @@ const STYLE_DESCRIPTIONS = {
  * Composable for narration script generation and TTS audio
  */
 export function useNarrationApi() {
-  const { callWithFallback, getCustomBaseUrl } = useApiKeyManager()
+  const { callWithFallback, getFreeTierBaseUrl, getFreeTierModel } = useApiKeyManager()
   const store = useGeneratorStore()
 
   /**
@@ -162,7 +162,7 @@ ${
    */
   const callScriptGeneration = async (pages, settings, model, temperature, onThinkingChunk) => {
     return callWithFallback(async (apiKey) => {
-      const ai = new GoogleGenAI(buildSdkOptions(apiKey, getCustomBaseUrl()))
+      const ai = new GoogleGenAI(buildSdkOptions(apiKey, getFreeTierBaseUrl()))
       const prompt = buildNarrationPrompt(pages, settings)
 
       const response = await ai.models.generateContentStream({
@@ -211,7 +211,7 @@ ${
     onThinkingChunk = null,
     maxRetries = 2,
   ) => {
-    const model = settings.scriptModel || DEFAULT_TEXT_MODEL
+    const model = settings.scriptModel || getFreeTierModel() || DEFAULT_TEXT_MODEL
     const temperature = store.temperature
 
     const result = await callScriptGeneration(pages, settings, model, temperature, onThinkingChunk)
@@ -307,7 +307,7 @@ ${
           }
 
     const result = await callWithFallback(async (apiKey) => {
-      const ai = new GoogleGenAI(buildSdkOptions(apiKey, getCustomBaseUrl()))
+      const ai = new GoogleGenAI(buildSdkOptions(apiKey, getFreeTierBaseUrl()))
 
       const response = await ai.models.generateContent({
         model: ttsModel,

@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useGeneratorStore } from '@/stores/generator'
 import { useApiKeyManager } from '@/composables/useApiKeyManager'
+import { TEXT_MODELS, DEFAULT_TEXT_MODEL } from '@/constants/modelOptions'
 
 useI18n() // Enable $t in template
 const store = useGeneratorStore()
@@ -12,6 +13,10 @@ const {
   setFreeTierApiKey,
   getCustomBaseUrl,
   setCustomBaseUrl,
+  getFreeTierBaseUrl,
+  setFreeTierBaseUrl,
+  getFreeTierModel,
+  setFreeTierModel,
 } = useApiKeyManager()
 
 // Paid API Key state
@@ -26,16 +31,17 @@ const showFreeTierKey = ref(false)
 const isEditingFreeTier = ref(false)
 const freeTierApiKey = ref('')
 
-// Load keys on mount
-onMounted(() => {
-  paidApiKey.value = getPaidApiKey()
-  freeTierApiKey.value = getFreeTierApiKey()
-  savedBaseUrl.value = getCustomBaseUrl()
+// Primary endpoint state
+const primaryBaseUrlInput = ref('')
+const isEditingPrimaryBaseUrl = ref(false)
+const savedPrimaryBaseUrl = ref('')
+const showPrimaryEndpointSection = ref(false)
 
-  if (!paidApiKey.value) {
-    isEditingPaid.value = true
-  }
-})
+// Free Tier endpoint state
+const freeTierBaseUrlInput = ref('')
+const isEditingFreeTierBaseUrl = ref(false)
+const savedFreeTierBaseUrl = ref('')
+const showFreeTierEndpointSection = ref(false)
 
 // Watch for store API key changes (for backward compatibility)
 watch(
@@ -57,6 +63,17 @@ function maskKey(key) {
   if (!key) return ''
   if (key.length <= 8) return '*'.repeat(key.length)
   return key.slice(0, 4) + '*'.repeat(key.length - 8) + key.slice(-4)
+}
+
+function isValidHttpsUrl(url) {
+  const value = url.trim()
+  if (!value || !value.startsWith('https://')) return false
+  try {
+    const parsed = new URL(value)
+    return parsed.protocol === 'https:' && parsed.hostname.length > 0
+  } catch {
+    return false
+  }
 }
 
 // Paid API Key actions
@@ -113,49 +130,140 @@ const cancelEditingFreeTier = () => {
   freeTierInputKey.value = ''
 }
 
-// Custom Base URL state
-const customBaseUrlInput = ref('')
-const isEditingBaseUrl = ref(false)
-const savedBaseUrl = ref('')
+// Text model selection state
+const selectedTextModel = ref('')
+const isCustomModel = ref(false)
+const customModelInput = ref('')
+const CUSTOM_VALUE = '__custom__'
 
-const saveBaseUrl = () => {
-  const url = customBaseUrlInput.value.trim()
-  if (url && url.startsWith('https://')) {
-    const normalized = url.replace(/\/+$/, '')
-    setCustomBaseUrl(normalized)
-    savedBaseUrl.value = normalized
-    customBaseUrlInput.value = ''
-    isEditingBaseUrl.value = false
+onMounted(() => {
+  paidApiKey.value = getPaidApiKey()
+  freeTierApiKey.value = getFreeTierApiKey()
+  savedPrimaryBaseUrl.value = getCustomBaseUrl()
+
+  // One-time migration: copy shared endpoint to Free Tier if not set
+  const existingSharedUrl = getCustomBaseUrl()
+  if (existingSharedUrl && !getFreeTierBaseUrl()) {
+    setFreeTierBaseUrl(existingSharedUrl)
   }
-}
 
-const clearBaseUrl = () => {
-  setCustomBaseUrl('')
-  savedBaseUrl.value = ''
-  customBaseUrlInput.value = ''
-  isEditingBaseUrl.value = false
-}
+  savedFreeTierBaseUrl.value = getFreeTierBaseUrl()
 
-const startEditingBaseUrl = () => {
-  isEditingBaseUrl.value = true
-  customBaseUrlInput.value = ''
-}
+  showPrimaryEndpointSection.value = !!savedPrimaryBaseUrl.value
+  showFreeTierEndpointSection.value = !!savedFreeTierBaseUrl.value
 
-const cancelEditingBaseUrl = () => {
-  isEditingBaseUrl.value = false
-  customBaseUrlInput.value = ''
-}
+  if (!paidApiKey.value) {
+    isEditingPaid.value = true
+  }
 
-const isValidBaseUrl = computed(() => {
-  const url = customBaseUrlInput.value.trim()
-  if (!url || !url.startsWith('https://')) return false
-  try {
-    const parsed = new URL(url)
-    return parsed.protocol === 'https:' && parsed.hostname.length > 0
-  } catch {
-    return false
+  // Load saved model
+  const saved = getFreeTierModel()
+  if (saved && TEXT_MODELS.some((m) => m.value === saved)) {
+    selectedTextModel.value = saved
+  } else if (saved) {
+    // Custom model that's not in the preset list
+    selectedTextModel.value = CUSTOM_VALUE
+    customModelInput.value = saved
+    isCustomModel.value = true
+  } else {
+    selectedTextModel.value = DEFAULT_TEXT_MODEL
   }
 })
+
+const handleModelChange = (event) => {
+  const value = event.target.value
+  if (value === CUSTOM_VALUE) {
+    isCustomModel.value = true
+    selectedTextModel.value = CUSTOM_VALUE
+    return
+  }
+
+  isCustomModel.value = false
+  customModelInput.value = ''
+  selectedTextModel.value = value
+  setFreeTierModel(value)
+}
+
+const saveCustomModel = () => {
+  const model = customModelInput.value.trim()
+  if (model) {
+    setFreeTierModel(model)
+  }
+}
+
+const cancelCustomModel = () => {
+  isCustomModel.value = false
+  customModelInput.value = ''
+  const saved = getFreeTierModel()
+  if (saved && TEXT_MODELS.some((m) => m.value === saved)) {
+    selectedTextModel.value = saved
+  } else {
+    selectedTextModel.value = DEFAULT_TEXT_MODEL
+  }
+}
+
+const isValidPrimaryBaseUrl = computed(() => isValidHttpsUrl(primaryBaseUrlInput.value))
+const isValidFreeTierBaseUrl = computed(() => isValidHttpsUrl(freeTierBaseUrlInput.value))
+
+const savePrimaryBaseUrl = () => {
+  const url = primaryBaseUrlInput.value.trim()
+  if (!isValidHttpsUrl(url)) return
+  const normalized = url.replace(/\/+$/, '')
+  setCustomBaseUrl(normalized)
+  savedPrimaryBaseUrl.value = normalized
+  primaryBaseUrlInput.value = ''
+  isEditingPrimaryBaseUrl.value = false
+}
+
+const clearPrimaryBaseUrl = () => {
+  setCustomBaseUrl('')
+  savedPrimaryBaseUrl.value = ''
+  primaryBaseUrlInput.value = ''
+  isEditingPrimaryBaseUrl.value = false
+}
+
+const startEditingPrimaryBaseUrl = () => {
+  isEditingPrimaryBaseUrl.value = true
+  primaryBaseUrlInput.value = ''
+}
+
+const cancelEditingPrimaryBaseUrl = () => {
+  isEditingPrimaryBaseUrl.value = false
+  primaryBaseUrlInput.value = ''
+  if (!savedPrimaryBaseUrl.value) {
+    showPrimaryEndpointSection.value = false
+  }
+}
+
+const saveFreeTierBaseUrlInput = () => {
+  const url = freeTierBaseUrlInput.value.trim()
+  if (!isValidHttpsUrl(url)) return
+  const normalized = url.replace(/\/+$/, '')
+  setFreeTierBaseUrl(normalized)
+  savedFreeTierBaseUrl.value = normalized
+  freeTierBaseUrlInput.value = ''
+  isEditingFreeTierBaseUrl.value = false
+}
+
+const clearFreeTierBaseUrlInput = () => {
+  setFreeTierBaseUrl('')
+  savedFreeTierBaseUrl.value = ''
+  freeTierBaseUrlInput.value = ''
+  isEditingFreeTierBaseUrl.value = false
+}
+
+const startEditingFreeTierBaseUrl = () => {
+  isEditingFreeTierBaseUrl.value = true
+  freeTierBaseUrlInput.value = ''
+}
+
+const cancelEditingFreeTierBaseUrl = () => {
+  isEditingFreeTierBaseUrl.value = false
+  freeTierBaseUrlInput.value = ''
+  if (!savedFreeTierBaseUrl.value) {
+    showFreeTierEndpointSection.value = false
+  }
+}
 </script>
 
 <template>
@@ -200,7 +308,6 @@ const isValidBaseUrl = computed(() => {
         </button>
       </div>
 
-      <!-- Display saved paid key -->
       <div v-if="paidApiKey && !isEditingPaid" class="flex items-center gap-2">
         <div class="flex-1 min-w-0 input-premium font-mono text-sm overflow-hidden text-ellipsis whitespace-nowrap">
           {{ showPaidKey ? paidApiKey : maskedPaidKey }}
@@ -238,7 +345,6 @@ const isValidBaseUrl = computed(() => {
         </button>
       </div>
 
-      <!-- Input paid key -->
       <div v-else class="space-y-4">
         <div class="relative">
           <input
@@ -287,6 +393,78 @@ const isValidBaseUrl = computed(() => {
           </a>
         </p>
       </div>
+
+      <div class="mt-4 pt-4 border-t border-border-muted/50">
+        <button
+          type="button"
+          class="w-full flex items-center justify-between text-left"
+          @click="showPrimaryEndpointSection = !showPrimaryEndpointSection"
+        >
+          <div>
+            <h4 class="text-xs font-medium text-text-secondary">{{ $t('apiKey.primaryEndpointTitle') }}</h4>
+            <p class="text-xs text-text-muted mt-1">{{ $t('apiKey.primaryEndpointHint') }}</p>
+          </div>
+          <span class="text-xs text-text-muted">
+            {{ showPrimaryEndpointSection ? $t('common.collapse') : $t('common.expand') }}
+          </span>
+        </button>
+
+        <div v-if="showPrimaryEndpointSection" class="mt-3">
+          <div v-if="savedPrimaryBaseUrl && !isEditingPrimaryBaseUrl" class="flex items-center gap-2">
+            <div class="flex-1 min-w-0 input-premium font-mono text-sm overflow-hidden text-ellipsis whitespace-nowrap">
+              {{ savedPrimaryBaseUrl }}
+            </div>
+            <button
+              @click="startEditingPrimaryBaseUrl"
+              class="flex-shrink-0 w-8 h-8 rounded-lg bg-bg-muted hover:bg-bg-interactive transition-colors flex items-center justify-center"
+              :title="$t('common.change')"
+            >
+              <svg class="w-4 h-4 text-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+            </button>
+            <button
+              @click="clearPrimaryBaseUrl"
+              class="flex-shrink-0 w-8 h-8 rounded-lg hover:bg-status-error/10 transition-colors flex items-center justify-center group"
+              :title="$t('common.clear')"
+            >
+              <svg class="w-4 h-4 text-text-muted group-hover:text-status-error transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </button>
+          </div>
+
+          <div v-else-if="isEditingPrimaryBaseUrl" class="space-y-3">
+            <input
+              v-model="primaryBaseUrlInput"
+              type="url"
+              :placeholder="$t('apiKey.customEndpointPlaceholder')"
+              class="input-premium font-mono text-sm"
+              @keyup.enter="savePrimaryBaseUrl"
+            />
+            <p v-if="primaryBaseUrlInput.trim() && !isValidPrimaryBaseUrl" class="text-xs text-status-warning">
+              {{ $t('apiKey.customEndpointHttpsOnly') }}
+            </p>
+            <div class="flex gap-2">
+              <button @click="savePrimaryBaseUrl" :disabled="!isValidPrimaryBaseUrl" class="btn-premium flex-1 text-sm">
+                {{ $t('apiKey.customEndpointSave') }}
+              </button>
+              <button @click="cancelEditingPrimaryBaseUrl" class="btn-secondary text-sm">
+                {{ $t('common.cancel') }}
+              </button>
+            </div>
+          </div>
+
+          <div v-else>
+            <button @click="startEditingPrimaryBaseUrl" class="btn-secondary w-full flex items-center justify-center gap-2 text-sm">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+              </svg>
+              {{ $t('apiKey.setCustomEndpoint') }}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Free Tier API Key Section -->
@@ -326,7 +504,6 @@ const isValidBaseUrl = computed(() => {
         </button>
       </div>
 
-      <!-- Display saved free tier key -->
       <div v-if="freeTierApiKey && !isEditingFreeTier" class="flex items-center gap-2">
         <div class="flex-1 min-w-0 input-premium font-mono text-sm overflow-hidden text-ellipsis whitespace-nowrap">
           {{ showFreeTierKey ? freeTierApiKey : maskedFreeTierKey }}
@@ -364,7 +541,6 @@ const isValidBaseUrl = computed(() => {
         </button>
       </div>
 
-      <!-- Input free tier key or show add button -->
       <div v-else-if="isEditingFreeTier" class="space-y-4">
         <div class="relative">
           <input
@@ -408,7 +584,6 @@ const isValidBaseUrl = computed(() => {
         </div>
       </div>
 
-      <!-- Add free tier key button -->
       <div v-else>
         <button @click="startEditingFreeTier" class="btn-secondary w-full flex items-center justify-center gap-2">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -421,101 +596,123 @@ const isValidBaseUrl = computed(() => {
         </p>
       </div>
 
-      <!-- Privacy warning -->
       <p class="text-xs text-status-warning mt-3 flex items-start gap-1.5">
         <svg class="w-3.5 h-3.5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
         </svg>
         <span>{{ $t('apiKey.freeTierPrivacyWarning') }}</span>
       </p>
-    </div>
 
-    <!-- Custom API Endpoint Section -->
-    <div class="glass p-6">
-      <div class="flex items-center justify-between mb-4">
-        <div class="flex items-center gap-3">
-          <div
-            class="w-8 h-8 flex-shrink-0 rounded-lg flex items-center justify-center transition-all"
-            :class="savedBaseUrl ? 'bg-brand-primary/20' : 'bg-bg-muted'"
-          >
-            <svg
-              class="w-4 h-4"
-              :class="savedBaseUrl ? 'text-brand-primary' : 'text-text-muted'"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"
-              />
-            </svg>
-          </div>
+      <div class="mt-4 pt-4 border-t border-border-muted/50">
+        <button
+          type="button"
+          class="w-full flex items-center justify-between text-left"
+          @click="showFreeTierEndpointSection = !showFreeTierEndpointSection"
+        >
           <div>
-            <h3 class="font-semibold text-text-primary text-sm">{{ $t('apiKey.customEndpointTitle') }}</h3>
-            <p class="text-xs text-text-muted">{{ $t('apiKey.customEndpointSubtitle') }}</p>
+            <h4 class="text-xs font-medium text-text-secondary">{{ $t('apiKey.freeTierEndpointTitle') }}</h4>
+            <p class="text-xs text-text-muted mt-1">{{ $t('apiKey.freeTierEndpointHint') }}</p>
+          </div>
+          <span class="text-xs text-text-muted">
+            {{ showFreeTierEndpointSection ? $t('common.collapse') : $t('common.expand') }}
+          </span>
+        </button>
+
+        <div v-if="showFreeTierEndpointSection" class="mt-3">
+          <div v-if="savedFreeTierBaseUrl && !isEditingFreeTierBaseUrl" class="flex items-center gap-2">
+            <div class="flex-1 min-w-0 input-premium font-mono text-sm overflow-hidden text-ellipsis whitespace-nowrap">
+              {{ savedFreeTierBaseUrl }}
+            </div>
+            <button
+              @click="startEditingFreeTierBaseUrl"
+              class="flex-shrink-0 w-8 h-8 rounded-lg bg-bg-muted hover:bg-bg-interactive transition-colors flex items-center justify-center"
+              :title="$t('common.change')"
+            >
+              <svg class="w-4 h-4 text-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+            </button>
+            <button
+              @click="clearFreeTierBaseUrlInput"
+              class="flex-shrink-0 w-8 h-8 rounded-lg hover:bg-status-error/10 transition-colors flex items-center justify-center group"
+              :title="$t('common.clear')"
+            >
+              <svg class="w-4 h-4 text-text-muted group-hover:text-status-error transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </button>
+          </div>
+
+          <div v-else-if="isEditingFreeTierBaseUrl" class="space-y-3">
+            <input
+              v-model="freeTierBaseUrlInput"
+              type="url"
+              :placeholder="$t('apiKey.customEndpointPlaceholder')"
+              class="input-premium font-mono text-sm"
+              @keyup.enter="saveFreeTierBaseUrlInput"
+            />
+            <p v-if="freeTierBaseUrlInput.trim() && !isValidFreeTierBaseUrl" class="text-xs text-status-warning">
+              {{ $t('apiKey.customEndpointHttpsOnly') }}
+            </p>
+            <div class="flex gap-2">
+              <button @click="saveFreeTierBaseUrlInput" :disabled="!isValidFreeTierBaseUrl" class="btn-premium flex-1 text-sm">
+                {{ $t('apiKey.customEndpointSave') }}
+              </button>
+              <button @click="cancelEditingFreeTierBaseUrl" class="btn-secondary text-sm">
+                {{ $t('common.cancel') }}
+              </button>
+            </div>
+          </div>
+
+          <div v-else>
+            <button @click="startEditingFreeTierBaseUrl" class="btn-secondary w-full flex items-center justify-center gap-2 text-sm">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+              </svg>
+              {{ $t('apiKey.setCustomEndpoint') }}
+            </button>
           </div>
         </div>
-        <button
-          v-if="savedBaseUrl && !isEditingBaseUrl"
-          @click="startEditingBaseUrl"
-          class="text-xs text-text-muted hover:text-text-primary transition-colors"
-        >
-          {{ $t('common.change') }}
-        </button>
       </div>
 
-      <!-- Display saved URL -->
-      <div v-if="savedBaseUrl && !isEditingBaseUrl" class="flex items-center gap-2">
-        <div class="flex-1 min-w-0 input-premium font-mono text-sm overflow-hidden text-ellipsis whitespace-nowrap">
-          {{ savedBaseUrl }}
-        </div>
-        <button
-          @click="clearBaseUrl"
-          class="flex-shrink-0 w-8 h-8 rounded-lg hover:bg-status-error/10 transition-colors flex items-center justify-center group"
-          :title="$t('common.clear')"
+      <div class="mt-4 pt-4 border-t border-border-muted/50">
+        <label class="block text-xs font-medium text-text-secondary mb-2">
+          {{ $t('apiKey.textModelLabel') }}
+        </label>
+        <select
+          :value="selectedTextModel"
+          @change="handleModelChange"
+          class="select-premium text-sm"
         >
-          <svg class="w-4 h-4 text-text-muted group-hover:text-status-error transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-          </svg>
-        </button>
-      </div>
+          <option v-for="m in TEXT_MODELS" :key="m.value" :value="m.value">
+            {{ m.label }}
+          </option>
+          <option :value="CUSTOM_VALUE">{{ $t('apiKey.textModelCustom') }}</option>
+        </select>
 
-      <!-- Input URL -->
-      <div v-else-if="isEditingBaseUrl" class="space-y-4">
-        <input
-          v-model="customBaseUrlInput"
-          type="url"
-          :placeholder="$t('apiKey.customEndpointPlaceholder')"
-          class="input-premium font-mono"
-          @keyup.enter="saveBaseUrl"
-        />
-        <p v-if="customBaseUrlInput.trim() && !isValidBaseUrl" class="text-xs text-status-warning">
-          {{ $t('apiKey.customEndpointHttpsOnly') }}
-        </p>
-        <div class="flex gap-3">
-          <button @click="saveBaseUrl" :disabled="!isValidBaseUrl" class="btn-premium flex-1">
-            {{ $t('apiKey.customEndpointSave') }}
+        <div v-if="isCustomModel" class="mt-2 flex gap-2">
+          <input
+            v-model="customModelInput"
+            type="text"
+            :placeholder="$t('apiKey.textModelCustomPlaceholder')"
+            class="input-premium font-mono text-sm flex-1"
+            @keyup.enter="saveCustomModel"
+          />
+          <button
+            @click="saveCustomModel"
+            :disabled="!customModelInput.trim()"
+            class="btn-premium px-3 text-sm"
+          >
+            {{ $t('apiKey.save') }}
           </button>
-          <button v-if="savedBaseUrl" @click="cancelEditingBaseUrl" class="btn-secondary">
+          <button @click="cancelCustomModel" class="btn-secondary px-3 text-sm">
             {{ $t('common.cancel') }}
           </button>
         </div>
-        <p class="text-xs text-text-muted">
-          {{ $t('apiKey.customEndpointHint') }}
-        </p>
-      </div>
 
-      <!-- Add endpoint button -->
-      <div v-else>
-        <button @click="startEditingBaseUrl" class="btn-secondary w-full flex items-center justify-center gap-2">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-          </svg>
-          {{ $t('apiKey.setCustomEndpoint') }}
-        </button>
+        <p class="text-xs text-text-muted mt-2">
+          {{ $t('apiKey.textModelHint') }}
+        </p>
       </div>
     </div>
   </div>

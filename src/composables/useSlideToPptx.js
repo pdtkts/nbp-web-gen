@@ -103,7 +103,7 @@ export function useSlideToPptx() {
   const ocr = useOcr()
   const inpainting = useInpaintingWorker()
   const pptx = usePptxExport()
-  const { getApiKey, getCustomBaseUrl } = useApiKeyManager()
+  const { getApiKey, getCustomBaseUrl, getFreeTierBaseUrl } = useApiKeyManager()
 
   // State
   const isProcessing = ref(false)
@@ -343,7 +343,8 @@ Output: A single clean image with all text removed.`
       prompt += `\n\nADDITIONAL USER INSTRUCTIONS:\n${customPrompt.trim()}`
     }
 
-    const ai = new GoogleGenAI(buildSdkOptions(apiKey, getCustomBaseUrl()))
+    const baseUrl = usage === 'text' ? getFreeTierBaseUrl() : getCustomBaseUrl()
+    const ai = new GoogleGenAI(buildSdkOptions(apiKey, baseUrl))
 
     // Build config - adjust based on model capabilities
     const is31Flash = effectiveSettings.geminiModel === '3.1'
@@ -420,63 +421,8 @@ Output: A single clean image with all text removed.`
 
       throw new Error('No image in Gemini response')
     } catch (error) {
-      // Check if it's a quota error and we're using free tier
       if (usage === 'text' && isQuotaError(error)) {
         addLog(t('slideToPptx.logs.freeTierQuotaExceeded'), 'warning')
-
-        // Retry with paid key
-        const paidKey = getApiKey('image')
-        if (!paidKey) {
-          throw new Error(t('errors.paidApiKeyRequired'))
-        }
-
-        const paidAi = new GoogleGenAI(buildSdkOptions(paidKey, getCustomBaseUrl()))
-        const retryResponse = await paidAi.models.generateContent({
-          model: modelId,
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                { text: prompt },
-                {
-                  inlineData: {
-                    mimeType,
-                    data: base64Data,
-                  },
-                },
-              ],
-            },
-          ],
-          config,  // Reuse the same config with imageSize
-        })
-
-        const retryCandidate = retryResponse.candidates?.[0]
-        if (retryCandidate?.content?.parts) {
-          for (const part of retryCandidate.content.parts) {
-            if (part.inlineData) {
-              const resultMimeType = part.inlineData.mimeType || 'image/png'
-              const resultDataUrl = `data:${resultMimeType};base64,${part.inlineData.data}`
-
-              // Resize to match original dimensions if needed
-              if (originalWidth > 0 && originalHeight > 0) {
-                return await resizeImageToTarget(resultDataUrl, originalWidth, originalHeight)
-              }
-              return resultDataUrl
-            }
-            // Custom backend: image returned as fileData.fileUri (URL)
-            if (part.fileData && part.fileData.fileUri) {
-              const resultDataUrl = await fetchFileUriAsDataUrl(
-                part.fileData.fileUri,
-                part.fileData.mimeType || 'image/png',
-              )
-              if (originalWidth > 0 && originalHeight > 0) {
-                return await resizeImageToTarget(resultDataUrl, originalWidth, originalHeight)
-              }
-              return resultDataUrl
-            }
-          }
-        }
-        throw new Error('No image in Gemini response after retry')
       }
       throw error
     }

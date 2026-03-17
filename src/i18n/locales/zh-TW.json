@@ -75,8 +75,12 @@
     "freeTierSubtitle": "用於文字處理功能（選填）",
     "freeTierPlaceholder": "輸入您的 Free Tier API Key...",
     "addFreeTier": "新增 Free Tier 金鑰",
-    "freeTierHint": "Free Tier 金鑰可用於角色萃取、簡報風格分析等文字處理功能，額度用盡時會自動切換到主要金鑰。",
+    "freeTierHint": "Free Tier 金鑰可用於角色萃取、簡報風格分析等文字處理功能。",
     "freeTierPrivacyWarning": "Google 可能會使用 Free Tier 的輸入與輸出資料來改進其產品與模型。若有隱私疑慮，建議僅使用上方的付費 API Key。",
+    "textModelLabel": "文字處理模型",
+    "textModelHint": "用於風格分析、旁白生成、角色萃取、Agent 等文字處理功能",
+    "textModelCustom": "自訂模型...",
+    "textModelCustomPlaceholder": "輸入模型名稱",
     "showKey": "顯示金鑰",
     "hideKey": "隱藏金鑰",
     "customEndpointTitle": "自訂 API 端點",
@@ -85,7 +89,11 @@
     "customEndpointHint": "所有 Gemini API 請求將透過此端點轉發。留空則使用 Google 官方 API。",
     "setCustomEndpoint": "設定自訂端點",
     "customEndpointSave": "儲存端點",
-    "customEndpointHttpsOnly": "基於安全考量，僅支援 HTTPS 網址。"
+    "customEndpointHttpsOnly": "基於安全考量，僅支援 HTTPS 網址。",
+    "primaryEndpointTitle": "自訂 API 端點",
+    "primaryEndpointHint": "用於圖片/影片生成的 API 端點",
+    "freeTierEndpointTitle": "自訂 API 端點",
+    "freeTierEndpointHint": "用於文字處理功能的 API 端點"
   },
   "apiKeyModal": {
     "title": "設定 Gemini 金鑰",

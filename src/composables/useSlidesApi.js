@@ -73,7 +73,7 @@ const CONTENT_SPLIT_SCHEMA = {
  * Provides style analysis and content splitting capabilities
  */
 export function useSlidesApi() {
-  const { callWithFallback, getCustomBaseUrl } = useApiKeyManager()
+  const { callWithFallback, getFreeTierBaseUrl, getFreeTierModel } = useApiKeyManager()
 
   /**
    * Analyze slide content and suggest design styles (global + per-page)
@@ -86,7 +86,7 @@ export function useSlidesApi() {
    * @returns {Promise<{globalStyle: string, pageStyles: Array<{pageId: string, styleGuide: string}>}>}
    */
   const analyzeSlideStyle = async (pages, options = {}, onThinkingChunk = null) => {
-    const model = options.model || DEFAULT_TEXT_MODEL
+    const model = options.model || getFreeTierModel() || DEFAULT_TEXT_MODEL
     const styleGuidance = options.styleGuidance?.trim() || ''
 
     // Build content with page IDs
@@ -196,9 +196,9 @@ Return valid JSON matching this structure:
 Write all descriptions in English.`
 
     try {
-      // Use callWithFallback: Free Tier first, then paid key on quota error
+      // Use callWithFallback (compat name): direct Free Tier call (no paid fallback)
       return await callWithFallback(async (apiKey) => {
-        const ai = new GoogleGenAI(buildSdkOptions(apiKey, getCustomBaseUrl()))
+        const ai = new GoogleGenAI(buildSdkOptions(apiKey, getFreeTierBaseUrl()))
 
         // Use streaming to capture thinking process
         const response = await ai.models.generateContentStream({
@@ -269,7 +269,7 @@ Write all descriptions in English.`
    * @returns {Promise<{globalDescription: string, pages: Array<{pageNumber: number, content: string}>}>}
    */
   const splitSlidesContent = async (rawContent, options = {}, onThinkingChunk = null) => {
-    const model = options.model || DEFAULT_TEXT_MODEL
+    const model = options.model || getFreeTierModel() || DEFAULT_TEXT_MODEL
     const targetPages = options.targetPages || 10
     const additionalNotes = options.additionalNotes?.trim() || ''
 
@@ -325,9 +325,9 @@ For each page, create content that:
 Write all content in the same language as the input material.`
 
     try {
-      // Use callWithFallback: Free Tier first, then paid key on quota error
+      // Use callWithFallback (compat name): direct Free Tier call (no paid fallback)
       return await callWithFallback(async (apiKey) => {
-        const ai = new GoogleGenAI(buildSdkOptions(apiKey, getCustomBaseUrl()))
+        const ai = new GoogleGenAI(buildSdkOptions(apiKey, getFreeTierBaseUrl()))
 
         const response = await ai.models.generateContentStream({
           model,

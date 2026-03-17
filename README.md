@@ -34,7 +34,7 @@ Designed for environments where data privacy is non-negotiable (hospitals, enter
 <a name="english"></a>
 ## 🎬 About The Project
 
-**Mediator** (Media + Creator) is a modern web interface designed to unlock the full potential of Google's Gemini image generation models (`gemini-3-pro-image-preview`, `gemini-3.1-flash-image-preview`) and **Veo 3.1 video generation API**.
+**Mediator** (Media + Creator) is a modern web interface designed to unlock the full potential of Google's Gemini image generation models (`gemini-3.0-pro-image`, `gemini-3.1-flash-image`) and **Veo 3.1 video generation API**.
 
 While starting as a web adaptation of existing CLI tools, this project has evolved into a feature-rich PWA with unique capabilities like **Automated Sticker Segmentation**, **Visual Storytelling**, **Technical Diagramming**, and **AI Video Generation**.
 
@@ -193,7 +193,7 @@ npm run build
 
 ## 🎬 關於本專案
 
-**Mediator**（Media + Creator = Mediator）是一個專為 Google Gemini 圖像生成模型（`gemini-3-pro-image-preview`、`gemini-3.1-flash-image-preview`）與 **Veo 3.1 影片生成 API** 打造的現代化網頁介面。
+**Mediator**（Media + Creator = Mediator）是一個專為 Google Gemini 圖像生成模型（`gemini-3.0-pro-image`、`gemini-3.1-flash-image`）與 **Veo 3.1 影片生成 API** 打造的現代化網頁介面。
 
 本專案最初是為了將強大的 CLI 工具網頁化，隨後發展成為一個功能豐富的 PWA，並加入了許多獨家功能，如**自動化貼圖分割**、**視覺故事生成**、**技術圖表繪製**以及 **AI 影片生成**。
 

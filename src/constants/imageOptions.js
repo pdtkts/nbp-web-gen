@@ -5,8 +5,8 @@
 
 // Model Configuration
 export const IMAGE_MODELS = [
-  { value: 'gemini-3-pro-image-preview', label: 'Gemini 3 Pro Image' },
-  { value: 'gemini-3.1-flash-image-preview', label: 'Gemini 3.1 Flash Image' },
+  { value: 'gemini-3.0-pro-image', label: 'Gemini 3 Pro Image' },
+  { value: 'gemini-3.1-flash-image', label: 'Gemini 3.1 Flash Image' },
 ]
 export const DEFAULT_MODEL = IMAGE_MODELS[0].value
 

@@ -3,8 +3,8 @@ import { getModelDisplayName, getModelShortName, getHistoryModelName } from './m
 
 describe('getModelDisplayName', () => {
   it('returns full label for known image model', () => {
-    expect(getModelDisplayName('gemini-3-pro-image-preview')).toBe('Gemini 3 Pro Image')
-    expect(getModelDisplayName('gemini-3.1-flash-image-preview')).toBe('Gemini 3.1 Flash Image')
+    expect(getModelDisplayName('gemini-3.0-pro-image')).toBe('Gemini 3 Pro Image')
+    expect(getModelDisplayName('gemini-3.1-flash-image')).toBe('Gemini 3.1 Flash Image')
   })
 
   it('returns full label for known text model', () => {
@@ -21,8 +21,8 @@ describe('getModelDisplayName', () => {
 
 describe('getModelShortName', () => {
   it('returns short label for image models', () => {
-    expect(getModelShortName('gemini-3-pro-image-preview')).toBe('3 Pro')
-    expect(getModelShortName('gemini-3.1-flash-image-preview')).toBe('3.1 Flash')
+    expect(getModelShortName('gemini-3.0-pro-image')).toBe('3 Pro')
+    expect(getModelShortName('gemini-3.1-flash-image')).toBe('3.1 Flash')
   })
 
   it('returns short label for text models', () => {
@@ -45,7 +45,7 @@ describe('getModelShortName', () => {
 
 describe('getHistoryModelName', () => {
   it('returns short name for generate mode with model', () => {
-    expect(getHistoryModelName('generate', { model: 'gemini-3-pro-image-preview' }))
+    expect(getHistoryModelName('generate', { model: 'gemini-3.0-pro-image' }))
       .toBe('3 Pro')
   })
 
@@ -60,7 +60,7 @@ describe('getHistoryModelName', () => {
   })
 
   it('returns correct short name for non-default image model', () => {
-    expect(getHistoryModelName('generate', { model: 'gemini-3.1-flash-image-preview' }))
+    expect(getHistoryModelName('generate', { model: 'gemini-3.1-flash-image' }))
       .toBe('3.1 Flash')
   })
 
@@ -79,7 +79,7 @@ describe('getHistoryModelName', () => {
   })
 
   it('returns image model for slides mode', () => {
-    expect(getHistoryModelName('slides', { model: 'gemini-3-pro-image-preview' }))
+    expect(getHistoryModelName('slides', { model: 'gemini-3.0-pro-image' }))
       .toBe('3 Pro')
   })
 })

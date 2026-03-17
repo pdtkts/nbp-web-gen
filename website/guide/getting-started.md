@@ -23,7 +23,7 @@ Mediator 使用 Google AI Studio 的 API，你需要先取得 API Key。
 4. 複製產生的 API Key
 
 ::: danger 需要綁定付費帳戶
-Mediator 使用 Gemini 3 Pro Image（gemini-3-pro-image-preview）進行圖片生成，此模型沒有免費額度，需要在 Google Cloud 專案中啟用 Billing（付費帳戶）才能使用。
+Mediator 使用 Gemini 3 Pro Image（gemini-3.0-pro-image）進行圖片生成，此模型沒有免費額度，需要在 Google Cloud 專案中啟用 Billing（付費帳戶）才能使用。
 
 設定方式：
 

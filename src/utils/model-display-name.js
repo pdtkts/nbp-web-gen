@@ -14,8 +14,8 @@ for (const m of VEO_MODEL_OPTIONS) modelMap.set(m.value, m.label)
 
 // Short label map: codeName → compact tag label (for history list)
 const shortMap = new Map([
-  ['gemini-3-pro-image-preview', '3 Pro'],
-  ['gemini-3.1-flash-image-preview', '3.1 Flash'],
+  ['gemini-3.0-pro-image', '3 Pro'],
+  ['gemini-3.1-flash-image', '3.1 Flash'],
   ['gemini-3-flash-preview', '3 Flash'],
   ['gemini-3.1-pro-preview', '3.1 Pro'],
   ['fast', 'Fast'],

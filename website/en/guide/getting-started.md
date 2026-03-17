@@ -23,7 +23,7 @@ Prefer learning by video? Check out the tutorial on the [API Key Management](./a
 4. Copy the generated API Key
 
 ::: danger Billing Account Required
-Mediator uses the Gemini 3 Pro Image model (gemini-3-pro-image-preview) for image generation. This model has no free tier and requires enabling Billing on your Google Cloud project to use.
+Mediator uses the Gemini 3 Pro Image model (gemini-3.0-pro-image) for image generation. This model has no free tier and requires enabling Billing on your Google Cloud project to use.
 
 How to set up:
 

@@ -20,7 +20,6 @@ import ImageUploader from '@/components/ImageUploader.vue'
 import GitHubLink from '@/components/GitHubLink.vue'
 import YouTubeLink from '@/components/YouTubeLink.vue'
 import DocsLink from '@/components/DocsLink.vue'
-import HeroTitle from '@/components/HeroTitle.vue'
 
 // Lazy loaded: Mode-specific options (only one shown at a time)
 const GenerateOptions = defineAsyncComponent(() => import('@/components/GenerateOptions.vue'))
@@ -386,99 +385,12 @@ const changeTheme = async (themeName, event) => {
 // App version from package.json (injected by Vite)
 const appVersion = __APP_VERSION__
 
-// Scroll to panels
-const heroRef = ref(null)
+// Scroll targets
 const panelsRef = ref(null)
 const thinkingRef = ref(null)
 
-const scrollToContent = () => {
-  panelsRef.value?.scrollIntoView({ behavior: 'smooth' })
-}
-
 const scrollToThinking = () => {
   thinkingRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-}
-
-// ============================================
-// Asymmetric Scroll Behavior
-// - Scroll down: Easy snap from Hero to Main (20% threshold)
-// - Scroll up: Requires scrolling near top to return to Hero
-// ============================================
-const isInMainSection = ref(false)
-const isScrollLocked = ref(false)
-let lastScrollY = 0
-let scrollVelocity = 0
-let lastScrollTime = 0
-
-const handleAsymmetricScroll = () => {
-  if (isScrollLocked.value) return
-
-  const currentScrollY = window.scrollY
-  const currentTime = Date.now()
-  const heroHeight = heroRef.value?.offsetHeight || window.innerHeight
-
-  // Calculate scroll velocity (px/ms)
-  const timeDelta = currentTime - lastScrollTime
-  if (timeDelta > 0) {
-    scrollVelocity = (currentScrollY - lastScrollY) / timeDelta
-  }
-
-  const scrollDirection = currentScrollY > lastScrollY ? 'down' : 'up'
-
-  // Scroll DOWN: Easy snap to Main Section
-  if (scrollDirection === 'down' && !isInMainSection.value) {
-    // Snap when scrolled past 20% of hero height
-    if (currentScrollY > heroHeight * 0.2) {
-      snapToMain()
-    }
-  }
-
-  // Scroll UP: Requires more effort to return to Hero
-  if (scrollDirection === 'up' && isInMainSection.value) {
-    // Option 1: Scrolled very close to top (< 80px)
-    // Option 2: Fast upward scroll velocity (> 1.5 px/ms) near top area
-    const nearTop = currentScrollY < 80
-    const fastScrollNearTop = currentScrollY < heroHeight * 0.5 && scrollVelocity < -1.5
-
-    if (nearTop || fastScrollNearTop) {
-      snapToHero()
-    }
-  }
-
-  lastScrollY = currentScrollY
-  lastScrollTime = currentTime
-}
-
-const snapToMain = () => {
-  isScrollLocked.value = true
-  isInMainSection.value = true
-  panelsRef.value?.scrollIntoView({ behavior: 'smooth' })
-  // Unlock after animation completes
-  setTimeout(() => {
-    isScrollLocked.value = false
-    lastScrollY = window.scrollY
-  }, 600)
-}
-
-const snapToHero = () => {
-  isScrollLocked.value = true
-  isInMainSection.value = false
-  heroRef.value?.scrollIntoView({ behavior: 'smooth' })
-  // Unlock after animation completes
-  setTimeout(() => {
-    isScrollLocked.value = false
-    lastScrollY = window.scrollY
-  }, 600)
-}
-
-// Throttle scroll handler for performance
-let scrollThrottleTimer = null
-const throttledScrollHandler = () => {
-  if (scrollThrottleTimer) return
-  scrollThrottleTimer = setTimeout(() => {
-    handleAsymmetricScroll()
-    scrollThrottleTimer = null
-  }, 50)
 }
 
 // Intersection observer for panel animations
@@ -535,12 +447,6 @@ const handleBeforeUnload = (e) => {
 }
 
 onMounted(() => {
-  // Force scroll to top on page load
-  window.scrollTo({ top: 0, behavior: 'instant' })
-
-  // Setup asymmetric scroll behavior
-  window.addEventListener('scroll', throttledScrollHandler, { passive: true })
-
   // Register beforeunload handler
   window.addEventListener('beforeunload', handleBeforeUnload)
 
@@ -552,12 +458,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  window.removeEventListener('scroll', throttledScrollHandler)
   window.removeEventListener('beforeunload', handleBeforeUnload)
-  if (scrollThrottleTimer) {
-    clearTimeout(scrollThrottleTimer)
-    scrollThrottleTimer = null
-  }
   intersectionObserver?.disconnect()
 })
 
@@ -611,19 +512,25 @@ const handleAddToReferences = (referenceData) => {
 
 <template>
   <div>
-    <!-- Hero Section - Full Screen -->
-    <section ref="heroRef" class="relative z-10 h-dvh flex flex-col items-center justify-center">
-      <!-- Top Right Controls -->
-      <div class="absolute right-4 top-4 flex items-center gap-2">
+    <!-- Navbar -->
+    <nav class="relative z-20 container mx-auto px-4 pt-4 pb-2 flex items-center justify-between">
+      <!-- Logo -->
+      <div class="flex items-center">
+        <img
+          src="/nbp-title-384.webp"
+          srcset="/nbp-title-320.webp 320w, /nbp-title-384.webp 384w"
+          sizes="32px"
+          alt="Nano Banana Pro"
+          class="w-8 h-8 drop-shadow-md"
+        />
+      </div>
+
+      <!-- Controls -->
+      <div class="flex items-center gap-2">
         <!-- Tour Help Button -->
         <button
           @click="tour.resetTourCompletion(); tour.start()"
-          class="h-[50px] px-3 rounded-xl transition-all group flex items-center justify-center"
-          :class="
-            isDarkTheme
-              ? 'bg-bg-muted border border-border-muted hover:bg-bg-interactive'
-              : 'bg-bg-subtle border border-border-subtle hover:bg-bg-subtle'
-          "
+          class="glass p-2.5 rounded-xl transition-all group hover:brightness-110"
           :title="$t('tour.help')"
         >
           <svg
@@ -645,12 +552,7 @@ const handleAddToReferences = (referenceData) => {
         <!-- Language Toggle Button -->
         <button
           @click="toggleLocale"
-          class="p-3 rounded-xl transition-all group"
-          :class="
-            isDarkTheme
-              ? 'bg-bg-muted border border-border-muted hover:bg-bg-interactive'
-              : 'bg-bg-subtle border border-border-subtle hover:bg-bg-subtle'
-          "
+          class="glass p-2.5 rounded-xl transition-all group hover:brightness-110"
           :title="$t('language.label')"
           :aria-label="$t('language.label')"
         >
@@ -664,20 +566,15 @@ const handleAddToReferences = (referenceData) => {
             }}
           </span>
         </button>
-        
+
         <!-- Theme Selector (Dropdown) -->
         <div id="theme-menu-container" class="relative">
           <button
             @click="isThemeMenuOpen = !isThemeMenuOpen"
-            class="p-3 rounded-xl transition-all group flex items-center gap-2"
-            :class="
-              isDarkTheme
-                ? 'bg-bg-muted border border-border-muted hover:bg-bg-interactive'
-                : 'bg-bg-subtle border border-border-subtle hover:bg-bg-subtle'
-            "
+            class="glass p-2.5 rounded-xl transition-all group flex items-center gap-2 hover:brightness-110"
             :title="$t('theme.label')"
           >
-            <!-- Current Theme Icon: 亮色→太陽, 暗色→月亮 -->
+            <!-- Dark theme icon: moon -->
             <svg
               v-if="isDarkTheme"
               class="w-5 h-5 text-brand-primary"
@@ -687,6 +584,7 @@ const handleAddToReferences = (referenceData) => {
             >
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
             </svg>
+            <!-- Light theme icon: sun -->
             <svg
               v-else
               class="w-5 h-5 text-accent-star"
@@ -733,7 +631,6 @@ const handleAddToReferences = (referenceData) => {
                   ]"
                 >
                   <span class="flex items-center gap-2">
-                    <!-- 淺色主題 → 太陽 -->
                     <svg
                       v-if="getThemeType(themeName) === 'light'"
                       class="w-4 h-4 text-accent-star"
@@ -743,7 +640,6 @@ const handleAddToReferences = (referenceData) => {
                     >
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
                     </svg>
-                    <!-- 深色主題 → 月亮 -->
                     <svg
                       v-else
                       class="w-4 h-4 text-brand-primary"
@@ -764,58 +660,7 @@ const handleAddToReferences = (referenceData) => {
           </Transition>
         </div>
       </div>
-
-      <!-- Hero Content -->
-      <div class="text-center">
-        <div class="inline-flex items-center gap-3 mb-6">
-          <img
-            src="/nbp-title-384.webp"
-            srcset="/nbp-title-320.webp 320w, /nbp-title-384.webp 384w, /nbp-title-512.webp 512w"
-            sizes="(min-width: 1024px) 192px, 160px"
-            alt="Nano Banana Pro"
-            class="w-40 h-40 lg:w-48 lg:h-48 drop-shadow-2xl hero-float"
-            fetchpriority="high"
-          />
-        </div>
-        <HeroTitle />
-        <p
-          class="text-lg lg:text-xl flex items-center justify-center gap-2 mb-2"
-          :class="isDarkTheme ? 'text-text-secondary' : 'text-text-muted'"
-        >
-          <span class="opacity-60">—</span>
-          <span>Powered by Nano Banana Pro & Veo</span>
-          <span class="opacity-60">—</span>
-        </p>
-        <div class="flex flex-col items-center gap-2">
-          <span class="text-sm px-3 py-1 rounded-full bg-mode-generate-muted text-mode-generate font-mono">
-            v{{ appVersion }}
-          </span>
-          <div class="flex items-center gap-1" data-tour="docs-link">
-            <GitHubLink size="md" />
-            <YouTubeLink size="md" />
-            <DocsLink size="md" />
-          </div>
-        </div>
-      </div>
-
-      <!-- Scroll Down Button -->
-      <button
-        @click="scrollToContent"
-        class="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 text-text-muted hover:text-mode-generate transition-colors group cursor-pointer"
-      >
-        <span class="text-sm">{{ $t('hero.startUsing') }}</span>
-        <div class="scroll-indicator">
-          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M19 14l-7 7m0 0l-7-7m7 7V3"
-            />
-          </svg>
-        </div>
-      </button>
-    </section>
+    </nav>
 
     <!-- Main Content -->
     <section

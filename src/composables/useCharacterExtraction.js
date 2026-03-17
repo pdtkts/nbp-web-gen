@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { GoogleGenAI } from '@google/genai'
 import { useApiKeyManager } from './useApiKeyManager'
+import { buildSdkOptions } from '@/utils/build-sdk-options'
 import { t } from '@/i18n'
 
 import { DEFAULT_TEXT_MODEL } from '@/constants/modelOptions'
@@ -55,7 +56,7 @@ const EXTRACTION_SCHEMA = {
 export function useCharacterExtraction() {
   const isExtracting = ref(false)
   const extractionError = ref(null)
-  const { callWithFallback, hasApiKeyFor } = useApiKeyManager()
+  const { callWithFallback, hasApiKeyFor, getCustomBaseUrl } = useApiKeyManager()
 
   /**
    * Extract character features from an image
@@ -85,7 +86,7 @@ export function useCharacterExtraction() {
     try {
       // Use callWithFallback for automatic Free Tier → Paid fallback
       const response = await callWithFallback(async (apiKey) => {
-        const ai = new GoogleGenAI({ apiKey })
+        const ai = new GoogleGenAI(buildSdkOptions(apiKey, getCustomBaseUrl()))
 
         return await ai.models.generateContent({
           model,

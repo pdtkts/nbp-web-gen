@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { GoogleGenAI, VideoGenerationReferenceType } from '@google/genai'
 import { useLocalStorage } from './useLocalStorage'
+import { buildSdkOptions } from '@/utils/build-sdk-options'
 import {
   VEO_MODELS,
   VIDEO_SUB_MODES,
@@ -104,7 +105,7 @@ export function useVideoApi() {
   const error = ref(null)
   const pollingProgress = ref(0) // 0-100
   const pollingStatus = ref('idle') // idle | initiating | polling | downloading | done | error
-  const { getApiKey } = useLocalStorage()
+  const { getApiKey, getCustomBaseUrl } = useLocalStorage()
 
   /**
    * Get the model ID based on options and constraints
@@ -290,7 +291,7 @@ export function useVideoApi() {
 
     try {
       // Initialize SDK
-      const ai = new GoogleGenAI({ apiKey })
+      const ai = new GoogleGenAI(buildSdkOptions(apiKey, getCustomBaseUrl()))
 
       // Build payload
       const payload = buildVideoPayload(prompt, options)

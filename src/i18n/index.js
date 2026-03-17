@@ -16,16 +16,24 @@ function getBrowserLocale() {
 
 // Get saved locale or detect from browser
 function getDefaultLocale() {
-  const saved = localStorage.getItem(STORAGE_KEY)
-  if (saved && ['zh-TW', 'en'].includes(saved)) {
-    return saved
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY)
+    if (saved && ['zh-TW', 'en'].includes(saved)) {
+      return saved
+    }
+  } catch {
+    // localStorage unavailable (e.g. test environment)
   }
   return getBrowserLocale()
 }
 
 // Save locale preference
 export function saveLocale(locale) {
-  localStorage.setItem(STORAGE_KEY, locale)
+  try {
+    localStorage.setItem(STORAGE_KEY, locale)
+  } catch {
+    // localStorage unavailable (e.g. test environment)
+  }
 }
 
 // Create i18n instance

@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { GoogleGenAI } from '@google/genai'
 import { useApiKeyManager } from './useApiKeyManager'
 import { useGeneratorStore } from '@/stores/generator'
+import { buildSdkOptions } from '@/utils/build-sdk-options'
 
 // Agent mode requires gemini-3-flash-preview specifically (codeExecution tool support)
 const AGENT_MODEL = 'gemini-3-flash-preview'
@@ -16,7 +17,7 @@ const AGENT_MODEL = 'gemini-3-flash-preview'
  * Output types: text, thought, executableCode, codeExecutionResult, inlineData
  */
 export function useAgentApi() {
-  const { callWithFallback } = useApiKeyManager()
+  const { callWithFallback, getCustomBaseUrl } = useApiKeyManager()
   const store = useGeneratorStore()
 
   const isStreaming = ref(false)
@@ -183,7 +184,7 @@ export function useAgentApi() {
     const { onPart, onComplete, onError, conversation } = callbacks
 
     return await callWithFallback(async (apiKey) => {
-      const ai = new GoogleGenAI({ apiKey })
+      const ai = new GoogleGenAI(buildSdkOptions(apiKey, getCustomBaseUrl()))
       const contextDepth = store.agentOptions.contextDepth || 5
 
       isStreaming.value = true

@@ -10,6 +10,8 @@ const {
   getPaidApiKey,
   getFreeTierApiKey,
   setFreeTierApiKey,
+  getCustomBaseUrl,
+  setCustomBaseUrl,
 } = useApiKeyManager()
 
 // Paid API Key state
@@ -28,6 +30,7 @@ const freeTierApiKey = ref('')
 onMounted(() => {
   paidApiKey.value = getPaidApiKey()
   freeTierApiKey.value = getFreeTierApiKey()
+  savedBaseUrl.value = getCustomBaseUrl()
 
   if (!paidApiKey.value) {
     isEditingPaid.value = true
@@ -109,6 +112,50 @@ const cancelEditingFreeTier = () => {
   isEditingFreeTier.value = false
   freeTierInputKey.value = ''
 }
+
+// Custom Base URL state
+const customBaseUrlInput = ref('')
+const isEditingBaseUrl = ref(false)
+const savedBaseUrl = ref('')
+
+const saveBaseUrl = () => {
+  const url = customBaseUrlInput.value.trim()
+  if (url && url.startsWith('https://')) {
+    const normalized = url.replace(/\/+$/, '')
+    setCustomBaseUrl(normalized)
+    savedBaseUrl.value = normalized
+    customBaseUrlInput.value = ''
+    isEditingBaseUrl.value = false
+  }
+}
+
+const clearBaseUrl = () => {
+  setCustomBaseUrl('')
+  savedBaseUrl.value = ''
+  customBaseUrlInput.value = ''
+  isEditingBaseUrl.value = false
+}
+
+const startEditingBaseUrl = () => {
+  isEditingBaseUrl.value = true
+  customBaseUrlInput.value = ''
+}
+
+const cancelEditingBaseUrl = () => {
+  isEditingBaseUrl.value = false
+  customBaseUrlInput.value = ''
+}
+
+const isValidBaseUrl = computed(() => {
+  const url = customBaseUrlInput.value.trim()
+  if (!url || !url.startsWith('https://')) return false
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'https:' && parsed.hostname.length > 0
+  } catch {
+    return false
+  }
+})
 </script>
 
 <template>
@@ -381,6 +428,95 @@ const cancelEditingFreeTier = () => {
         </svg>
         <span>{{ $t('apiKey.freeTierPrivacyWarning') }}</span>
       </p>
+    </div>
+
+    <!-- Custom API Endpoint Section -->
+    <div class="glass p-6">
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-3">
+          <div
+            class="w-8 h-8 flex-shrink-0 rounded-lg flex items-center justify-center transition-all"
+            :class="savedBaseUrl ? 'bg-brand-primary/20' : 'bg-bg-muted'"
+          >
+            <svg
+              class="w-4 h-4"
+              :class="savedBaseUrl ? 'text-brand-primary' : 'text-text-muted'"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"
+              />
+            </svg>
+          </div>
+          <div>
+            <h3 class="font-semibold text-text-primary text-sm">{{ $t('apiKey.customEndpointTitle') }}</h3>
+            <p class="text-xs text-text-muted">{{ $t('apiKey.customEndpointSubtitle') }}</p>
+          </div>
+        </div>
+        <button
+          v-if="savedBaseUrl && !isEditingBaseUrl"
+          @click="startEditingBaseUrl"
+          class="text-xs text-text-muted hover:text-text-primary transition-colors"
+        >
+          {{ $t('common.change') }}
+        </button>
+      </div>
+
+      <!-- Display saved URL -->
+      <div v-if="savedBaseUrl && !isEditingBaseUrl" class="flex items-center gap-2">
+        <div class="flex-1 min-w-0 input-premium font-mono text-sm overflow-hidden text-ellipsis whitespace-nowrap">
+          {{ savedBaseUrl }}
+        </div>
+        <button
+          @click="clearBaseUrl"
+          class="flex-shrink-0 w-8 h-8 rounded-lg hover:bg-status-error/10 transition-colors flex items-center justify-center group"
+          :title="$t('common.clear')"
+        >
+          <svg class="w-4 h-4 text-text-muted group-hover:text-status-error transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- Input URL -->
+      <div v-else-if="isEditingBaseUrl" class="space-y-4">
+        <input
+          v-model="customBaseUrlInput"
+          type="url"
+          :placeholder="$t('apiKey.customEndpointPlaceholder')"
+          class="input-premium font-mono"
+          @keyup.enter="saveBaseUrl"
+        />
+        <p v-if="customBaseUrlInput.trim() && !isValidBaseUrl" class="text-xs text-status-warning">
+          {{ $t('apiKey.customEndpointHttpsOnly') }}
+        </p>
+        <div class="flex gap-3">
+          <button @click="saveBaseUrl" :disabled="!isValidBaseUrl" class="btn-premium flex-1">
+            {{ $t('apiKey.customEndpointSave') }}
+          </button>
+          <button v-if="savedBaseUrl" @click="cancelEditingBaseUrl" class="btn-secondary">
+            {{ $t('common.cancel') }}
+          </button>
+        </div>
+        <p class="text-xs text-text-muted">
+          {{ $t('apiKey.customEndpointHint') }}
+        </p>
+      </div>
+
+      <!-- Add endpoint button -->
+      <div v-else>
+        <button @click="startEditingBaseUrl" class="btn-secondary w-full flex items-center justify-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+          </svg>
+          {{ $t('apiKey.setCustomEndpoint') }}
+        </button>
+      </div>
     </div>
   </div>
 </template>

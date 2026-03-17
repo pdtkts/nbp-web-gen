@@ -41,11 +41,6 @@ const TOUR_STEP_CONFIG = [
     selector: '[data-panel-id="history"]',
     placement: 'right',
   },
-  {
-    id: 'docs',
-    selector: '[data-tour="docs-link"]',
-    placement: 'bottom',
-  },
 ]
 
 // ============================================================================

@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@google/genai'
 import { useApiKeyManager } from './useApiKeyManager'
+import { buildSdkOptions } from '@/utils/build-sdk-options'
 import { DEFAULT_TEXT_MODEL } from '@/constants/modelOptions'
 import { useGeneratorStore } from '@/stores/generator'
 import { convertTtsResponseToAudio } from '@/utils/audioEncoder'
@@ -68,7 +69,7 @@ const STYLE_DESCRIPTIONS = {
  * Composable for narration script generation and TTS audio
  */
 export function useNarrationApi() {
-  const { callWithFallback } = useApiKeyManager()
+  const { callWithFallback, getCustomBaseUrl } = useApiKeyManager()
   const store = useGeneratorStore()
 
   /**
@@ -161,7 +162,7 @@ ${
    */
   const callScriptGeneration = async (pages, settings, model, temperature, onThinkingChunk) => {
     return callWithFallback(async (apiKey) => {
-      const ai = new GoogleGenAI({ apiKey })
+      const ai = new GoogleGenAI(buildSdkOptions(apiKey, getCustomBaseUrl()))
       const prompt = buildNarrationPrompt(pages, settings)
 
       const response = await ai.models.generateContentStream({
@@ -306,7 +307,7 @@ ${
           }
 
     const result = await callWithFallback(async (apiKey) => {
-      const ai = new GoogleGenAI({ apiKey })
+      const ai = new GoogleGenAI(buildSdkOptions(apiKey, getCustomBaseUrl()))
 
       const response = await ai.models.generateContent({
         model: ttsModel,

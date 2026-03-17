@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@google/genai'
 import { useApiKeyManager } from './useApiKeyManager'
+import { buildSdkOptions } from '@/utils/build-sdk-options'
 import { DEFAULT_TEXT_MODEL } from '@/constants/modelOptions'
 import { t } from '@/i18n'
 
@@ -72,7 +73,7 @@ const CONTENT_SPLIT_SCHEMA = {
  * Provides style analysis and content splitting capabilities
  */
 export function useSlidesApi() {
-  const { callWithFallback } = useApiKeyManager()
+  const { callWithFallback, getCustomBaseUrl } = useApiKeyManager()
 
   /**
    * Analyze slide content and suggest design styles (global + per-page)
@@ -197,7 +198,7 @@ Write all descriptions in English.`
     try {
       // Use callWithFallback: Free Tier first, then paid key on quota error
       return await callWithFallback(async (apiKey) => {
-        const ai = new GoogleGenAI({ apiKey })
+        const ai = new GoogleGenAI(buildSdkOptions(apiKey, getCustomBaseUrl()))
 
         // Use streaming to capture thinking process
         const response = await ai.models.generateContentStream({
@@ -326,7 +327,7 @@ Write all content in the same language as the input material.`
     try {
       // Use callWithFallback: Free Tier first, then paid key on quota error
       return await callWithFallback(async (apiKey) => {
-        const ai = new GoogleGenAI({ apiKey })
+        const ai = new GoogleGenAI(buildSdkOptions(apiKey, getCustomBaseUrl()))
 
         const response = await ai.models.generateContentStream({
           model,

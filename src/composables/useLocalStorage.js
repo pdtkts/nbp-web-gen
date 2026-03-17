@@ -1,5 +1,6 @@
 const API_KEY_STORAGE_KEY = 'nanobanana-api-key'
 const FREE_TIER_API_KEY_STORAGE_KEY = 'nanobanana-free-tier-api-key'
+const CUSTOM_BASE_URL_STORAGE_KEY = 'nanobanana-custom-base-url'
 const SETTINGS_STORAGE_KEY = 'nanobanana-settings'
 
 export function useLocalStorage() {
@@ -55,6 +56,32 @@ export function useLocalStorage() {
     return !!getFreeTierApiKey()
   }
 
+  // Custom Base URL management (for API proxy/relay)
+  const getCustomBaseUrl = () => {
+    try {
+      return localStorage.getItem(CUSTOM_BASE_URL_STORAGE_KEY) || ''
+    } catch {
+      return ''
+    }
+  }
+
+  const setCustomBaseUrl = (url) => {
+    try {
+      if (url) {
+        localStorage.setItem(CUSTOM_BASE_URL_STORAGE_KEY, url)
+      } else {
+        localStorage.removeItem(CUSTOM_BASE_URL_STORAGE_KEY)
+      }
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  const hasCustomBaseUrl = () => {
+    return !!getCustomBaseUrl()
+  }
+
   // Quick settings (for UI state that doesn't need IndexedDB)
   const getQuickSettings = () => {
     try {
@@ -94,6 +121,10 @@ export function useLocalStorage() {
     getFreeTierApiKey,
     setFreeTierApiKey,
     hasFreeTierApiKey,
+    // Custom Base URL (API proxy)
+    getCustomBaseUrl,
+    setCustomBaseUrl,
+    hasCustomBaseUrl,
     // Quick settings
     getQuickSettings,
     setQuickSettings,

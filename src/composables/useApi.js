@@ -3,6 +3,7 @@ import { GoogleGenAI, Modality, ThinkingLevel } from '@google/genai'
 import { useLocalStorage } from './useLocalStorage'
 import { isQuotaError } from './useApiKeyManager'
 import { buildPrompt } from './promptBuilders'
+import { buildSdkOptions } from '@/utils/build-sdk-options'
 import {
   clampInt,
   createMinIntervalLimiter,
@@ -41,7 +42,7 @@ export function useApi() {
   const loadingCount = ref(0)
   const isLoading = computed(() => loadingCount.value > 0)
   const error = ref(null)
-  const { getApiKey } = useLocalStorage()
+  const { getApiKey, getCustomBaseUrl } = useLocalStorage()
 
   const withLoading = async (fn) => {
     loadingCount.value += 1
@@ -316,7 +317,7 @@ export function useApi() {
           // On timeout, the AbortController cancels the underlying fetch request
           const streamOperation = async () => {
             // Initialize SDK client (fresh per attempt)
-            const ai = new GoogleGenAI({ apiKey })
+            const ai = new GoogleGenAI(buildSdkOptions(apiKey, getCustomBaseUrl()))
 
             // Make streaming API request using SDK with abort signal
             const response = await ai.models.generateContentStream({

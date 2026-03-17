@@ -43,6 +43,7 @@ import { GoogleGenAI } from '@google/genai'
 
 import { extractText, chunkText, extractAgentMessages, SEARCH_DEFAULTS } from '../utils/search-core.js'
 import { prepareEmbeddingMaterial } from '../utils/embedding-material.js'
+import { buildSdkOptions } from '../utils/build-sdk-options.js'
 
 // ============================================================================
 // Constants
@@ -168,6 +169,7 @@ let isInitialized = false
 // API keys for Gemini Embedding (passed from main thread)
 let apiKeyPrimary = null // Paid key
 let apiKeyFree = null // Free tier key (preferred for text usage)
+let customBaseUrl = '' // Custom API endpoint (proxy)
 
 // Free tier backoff: skip free key for 1 hour after 429
 let freeKeyExhausted = false
@@ -180,6 +182,7 @@ let activeProvider = null
 // @google/genai SDK instance (lazy-created, rebuilt when API key changes)
 let aiInstance = null
 let aiInstanceKey = null // Track which key was used to create the instance
+let aiInstanceBaseUrl = '' // Track which base URL was used to create the instance
 
 // Transformers.js pipeline for local embedding (lazy loaded)
 let localPipeline = null
@@ -532,9 +535,10 @@ function getApiKey() {
  * Reuses existing instance if the key hasn't changed.
  */
 function getAiInstance(apiKey) {
-  if (aiInstance && aiInstanceKey === apiKey) return aiInstance
-  aiInstance = new GoogleGenAI({ apiKey })
+  if (aiInstance && aiInstanceKey === apiKey && aiInstanceBaseUrl === customBaseUrl) return aiInstance
+  aiInstance = new GoogleGenAI(buildSdkOptions(apiKey, customBaseUrl))
   aiInstanceKey = apiKey
+  aiInstanceBaseUrl = customBaseUrl
   return aiInstance
 }
 
@@ -755,7 +759,8 @@ async function callGeminiMultimodalEmbed(base64, mimeType) {
 
   for (const { key, isFree } of keysToTry) {
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:embedContent?key=${key}`
+      const baseApiUrl = customBaseUrl || 'https://generativelanguage.googleapis.com'
+      const url = `${baseApiUrl}/v1beta/models/${geminiModel}:embedContent?key=${key}`
       const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1585,6 +1590,7 @@ async function initialize(keys = {}) {
   // Store API keys (can be updated later via 'updateApiKeys')
   if (keys.apiKey) apiKeyPrimary = keys.apiKey
   if (keys.freeApiKey) apiKeyFree = keys.freeApiKey
+  if (keys.customBaseUrl !== undefined) customBaseUrl = keys.customBaseUrl
   if (keys.provider !== undefined) activeProvider = keys.provider
 
   if (isInitialized) {
@@ -1700,7 +1706,7 @@ self.addEventListener('message', async (event) => {
   try {
     switch (type) {
       case 'init': {
-        await initialize({ apiKey: event.data.apiKey, freeApiKey: event.data.freeApiKey, provider: event.data.provider })
+        await initialize({ apiKey: event.data.apiKey, freeApiKey: event.data.freeApiKey, provider: event.data.provider, customBaseUrl: event.data.customBaseUrl })
         break
       }
 
@@ -1715,9 +1721,11 @@ self.addEventListener('message', async (event) => {
             if (freeKeyResetTimer) { clearTimeout(freeKeyResetTimer); freeKeyResetTimer = null }
           }
         }
-        // Invalidate SDK instance so it's recreated with the new key
+        if (event.data.customBaseUrl !== undefined) customBaseUrl = event.data.customBaseUrl
+        // Invalidate SDK instance so it's recreated with the new key/endpoint
         aiInstance = null
         aiInstanceKey = null
+        aiInstanceBaseUrl = ''
         console.log(`[search.worker] API keys updated (primary=${!!apiKeyPrimary}, free=${!!apiKeyFree}, freeBackedOff=${freeKeyExhausted})`)
         break
       }

@@ -727,50 +727,6 @@ html {
   scroll-behavior: smooth;
 }
 
-/* Note: scroll-snap removed in favor of JS-controlled asymmetric scrolling
-   - Scroll down: Easy snap from Hero to Main
-   - Scroll up: Requires more effort to return to Hero
-   See HomeView.vue handleAsymmetricScroll() for implementation */
-
-/* ============================================
-   Hero Section Animations
-   ============================================ */
-
-/* Floating animation for hero image */
-.hero-float {
-  animation: heroFloat 4s ease-in-out infinite;
-}
-
-@keyframes heroFloat {
-  0%, 100% {
-    transform: translateY(0) rotate(0deg);
-  }
-  25% {
-    transform: translateY(-8px) rotate(1deg);
-  }
-  50% {
-    transform: translateY(-4px) rotate(0deg);
-  }
-  75% {
-    transform: translateY(-10px) rotate(-1deg);
-  }
-}
-
-/* Scroll indicator pulsing animation */
-.scroll-indicator {
-  animation: scrollPulse 2s ease-in-out infinite;
-}
-
-@keyframes scrollPulse {
-  0%, 100% {
-    transform: translateY(0);
-    opacity: 1;
-  }
-  50% {
-    transform: translateY(8px);
-    opacity: 0.5;
-  }
-}
 
 /* ============================================
    Panel Pop-out Animations

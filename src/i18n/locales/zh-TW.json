@@ -78,7 +78,14 @@
     "freeTierHint": "Free Tier 金鑰可用於角色萃取、簡報風格分析等文字處理功能，額度用盡時會自動切換到主要金鑰。",
     "freeTierPrivacyWarning": "Google 可能會使用 Free Tier 的輸入與輸出資料來改進其產品與模型。若有隱私疑慮，建議僅使用上方的付費 API Key。",
     "showKey": "顯示金鑰",
-    "hideKey": "隱藏金鑰"
+    "hideKey": "隱藏金鑰",
+    "customEndpointTitle": "自訂 API 端點",
+    "customEndpointSubtitle": "透過代理伺服器轉發 API 請求（進階）",
+    "customEndpointPlaceholder": "https://your-proxy-server.com",
+    "customEndpointHint": "所有 Gemini API 請求將透過此端點轉發。留空則使用 Google 官方 API。",
+    "setCustomEndpoint": "設定自訂端點",
+    "customEndpointSave": "儲存端點",
+    "customEndpointHttpsOnly": "基於安全考量，僅支援 HTTPS 網址。"
   },
   "apiKeyModal": {
     "title": "設定 Gemini 金鑰",

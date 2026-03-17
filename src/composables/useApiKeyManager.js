@@ -21,6 +21,8 @@ export function useApiKeyManager() {
     getFreeTierApiKey,
     setFreeTierApiKey,
     hasFreeTierApiKey,
+    getCustomBaseUrl,
+    setCustomBaseUrl,
   } = useLocalStorage()
   const { t } = useI18n()
 
@@ -160,6 +162,10 @@ export function useApiKeyManager() {
 
     // 帶 fallback 的調用
     callWithFallback,
+
+    // Custom Base URL (API proxy)
+    getCustomBaseUrl,
+    setCustomBaseUrl,
 
     // 狀態（用於 UI 顯示）
     lastUsedKeyType: computed(() => lastUsedKeyType.value),

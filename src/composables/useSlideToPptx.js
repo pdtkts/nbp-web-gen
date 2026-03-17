@@ -15,6 +15,7 @@ import { useOcr } from './useOcr'
 import { useInpaintingWorker } from './useInpaintingWorker'
 import { usePptxExport } from './usePptxExport'
 import { useApiKeyManager, isQuotaError } from './useApiKeyManager'
+import { buildSdkOptions } from '@/utils/build-sdk-options'
 import { getSettings as getOcrSettings } from './useOcrSettings'
 import { mergeTextRegions } from '@/utils/ocr-core'
 import { t } from '@/i18n'
@@ -101,7 +102,7 @@ export function useSlideToPptx() {
   const ocr = useOcr()
   const inpainting = useInpaintingWorker()
   const pptx = usePptxExport()
-  const { getApiKey } = useApiKeyManager()
+  const { getApiKey, getCustomBaseUrl } = useApiKeyManager()
 
   // State
   const isProcessing = ref(false)
@@ -341,7 +342,7 @@ Output: A single clean image with all text removed.`
       prompt += `\n\nADDITIONAL USER INSTRUCTIONS:\n${customPrompt.trim()}`
     }
 
-    const ai = new GoogleGenAI({ apiKey })
+    const ai = new GoogleGenAI(buildSdkOptions(apiKey, getCustomBaseUrl()))
 
     // Build config - adjust based on model capabilities
     const is31Flash = effectiveSettings.geminiModel === '3.1'
@@ -417,7 +418,7 @@ Output: A single clean image with all text removed.`
           throw new Error(t('errors.paidApiKeyRequired'))
         }
 
-        const paidAi = new GoogleGenAI({ apiKey: paidKey })
+        const paidAi = new GoogleGenAI(buildSdkOptions(paidKey, getCustomBaseUrl()))
         const retryResponse = await paidAi.models.generateContent({
           model: modelId,
           contents: [

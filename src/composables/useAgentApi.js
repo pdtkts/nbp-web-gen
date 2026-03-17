@@ -3,6 +3,7 @@ import { GoogleGenAI } from '@google/genai'
 import { useApiKeyManager } from './useApiKeyManager'
 import { useGeneratorStore } from '@/stores/generator'
 import { buildSdkOptions } from '@/utils/build-sdk-options'
+import { fetchFileUriAsBase64 } from '@/utils/fetch-file-uri-as-base64'
 
 // Agent mode requires gemini-3-flash-preview specifically (codeExecution tool support)
 const AGENT_MODEL = 'gemini-3-flash-preview'
@@ -35,7 +36,7 @@ export function useAgentApi() {
    * - Result: { codeExecutionResult: { outcome: "OUTCOME_OK", output: "..." } }
    * - Image: { inlineData: { mimeType: "image/png", data: "base64..." } }
    */
-  const parsePart = (part) => {
+  const parsePart = async (part) => {
     // Text or Thought content - check thought flag first
     if (part.text !== undefined) {
       // thought: true means this is a thinking/reasoning part
@@ -76,6 +77,23 @@ export function useAgentApi() {
         type: 'generatedImage',
         mimeType: part.inlineData.mimeType,
         data: part.inlineData.data,
+      }
+    }
+
+    // Custom backend: image returned as fileData.fileUri (URL)
+    if (part.fileData && part.fileData.fileUri) {
+      try {
+        const result = await fetchFileUriAsBase64(
+          part.fileData.fileUri,
+          part.fileData.mimeType || 'image/png',
+        )
+        return {
+          type: 'generatedImage',
+          mimeType: result.mimeType,
+          data: result.data,
+        }
+      } catch (err) {
+        console.error('Failed to fetch fileUri image in agent mode:', err)
       }
     }
 
@@ -246,7 +264,7 @@ export function useAgentApi() {
             for (const candidate of chunk.candidates) {
               if (candidate.content && candidate.content.parts) {
                 for (const part of candidate.content.parts) {
-                  const parsedPart = parsePart(part)
+                  const parsedPart = await parsePart(part)
                   mergeOrAppendPart(parsedPart)
 
                   if (onPart) {

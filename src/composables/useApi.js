@@ -4,6 +4,7 @@ import { useLocalStorage } from './useLocalStorage'
 import { isQuotaError } from './useApiKeyManager'
 import { buildPrompt } from './promptBuilders'
 import { buildSdkOptions } from '@/utils/build-sdk-options'
+import { fetchFileUriAsBase64 } from '@/utils/fetch-file-uri-as-base64'
 import {
   clampInt,
   createMinIntervalLimiter,
@@ -176,7 +177,7 @@ export function useApi() {
    */
   const buildSdkConfig = (options = {}) => {
     const model = options.model || DEFAULT_MODEL
-    const is31Flash = model === 'gemini-3.1-flash-image-preview'
+    const is31Flash = model === 'gemini-3.1-flash-image'
 
     const config = {
       // 3.1 Flash outputs images only; older models return both image and text
@@ -284,7 +285,7 @@ export function useApi() {
       const model = options.model || DEFAULT_MODEL
 
       // Notify that 3.1 Flash doesn't expose thinking process
-      if (model === 'gemini-3.1-flash-image-preview' && onThinkingChunk) {
+      if (model === 'gemini-3.1-flash-image' && onThinkingChunk) {
         onThinkingChunk(`[${t('generation.noThinkingProcess')}]\n`)
       }
 
@@ -328,6 +329,7 @@ export function useApi() {
 
             // Process stream
             const images = []
+            const pendingFileUris = [] // fileData URIs to fetch after stream
             let textResponse = ''
             let thinkingText = ''
             let metadata = {}
@@ -338,6 +340,11 @@ export function useApi() {
                 const candidate = chunk.candidates[0]
 
                 if (candidate.content && candidate.content.parts) {
+                  // Track if this chunk has fileData (to skip redundant URL text)
+                  const hasFileData = candidate.content.parts.some(
+                    (p) => p.fileData && p.fileData.fileUri,
+                  )
+
                   for (const part of candidate.content.parts) {
                     if (part.inlineData) {
                       const imageData = {
@@ -355,7 +362,17 @@ export function useApi() {
                           mimeType: part.inlineData.mimeType || 'image/png',
                         })
                       }
+                    } else if (part.fileData && part.fileData.fileUri) {
+                      // Custom backend returns image as fileUri (URL) instead of inline base64
+                      pendingFileUris.push({
+                        fileUri: part.fileData.fileUri,
+                        mimeType: part.fileData.mimeType || 'image/png',
+                        isThought: !!part.thought,
+                      })
                     } else if (part.text) {
+                      // Skip text that is just the fileUri URL echoed back
+                      if (hasFileData && part.text.startsWith('http')) continue
+
                       // Check if this is thinking content (thought: true flag)
                       if (part.thought) {
                         // This is thinking/reasoning text
@@ -383,6 +400,24 @@ export function useApi() {
               // Model version
               if (chunk.modelVersion) {
                 metadata.modelVersion = chunk.modelVersion
+              }
+            }
+
+            // Fetch any fileUri images (custom backend returns URLs instead of base64)
+            if (pendingFileUris.length > 0) {
+              const fetchResults = await Promise.all(
+                pendingFileUris.map(async ({ fileUri, mimeType, isThought }) => {
+                  try {
+                    const result = await fetchFileUriAsBase64(fileUri, mimeType)
+                    return { ...result, isThought }
+                  } catch (err) {
+                    console.error('Failed to fetch fileUri image:', fileUri, err)
+                    return null
+                  }
+                }),
+              )
+              for (const img of fetchResults) {
+                if (img) images.push(img)
               }
             }
 

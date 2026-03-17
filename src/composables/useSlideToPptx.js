@@ -16,6 +16,7 @@ import { useInpaintingWorker } from './useInpaintingWorker'
 import { usePptxExport } from './usePptxExport'
 import { useApiKeyManager, isQuotaError } from './useApiKeyManager'
 import { buildSdkOptions } from '@/utils/build-sdk-options'
+import { fetchFileUriAsDataUrl } from '@/utils/fetch-file-uri-as-base64'
 import { getSettings as getOcrSettings } from './useOcrSettings'
 import { mergeTextRegions } from '@/utils/ocr-core'
 import { t } from '@/i18n'
@@ -134,8 +135,8 @@ export function useSlideToPptx() {
     slideRatio: 'auto',
     // Gemini model for text removal
     // '2.0' = gemini-2.5-flash-image (can use free tier)
-    // '3.0' = gemini-3-pro-image-preview (paid only)
-    // '3.1' = gemini-3.1-flash-image-preview (paid only)
+    // '3.0' = gemini-3.0-pro-image (paid only)
+    // '3.1' = gemini-3.1-flash-image (paid only)
     geminiModel: '2.0',
     // Image quality for non-2.0 model output (1k, 2k, 4k)
     imageQuality: '2k',
@@ -302,8 +303,8 @@ export function useSlideToPptx() {
     // Determine model and API key usage based on settings
     const MODEL_MAP = {
       '2.0': 'gemini-2.5-flash-image',
-      '3.0': 'gemini-3-pro-image-preview',
-      '3.1': 'gemini-3.1-flash-image-preview',
+      '3.0': 'gemini-3.0-pro-image',
+      '3.1': 'gemini-3.1-flash-image',
     }
     const modelId = MODEL_MAP[effectiveSettings.geminiModel] || MODEL_MAP['2.0']
 
@@ -404,6 +405,17 @@ Output: A single clean image with all text removed.`
           }
           return resultDataUrl
         }
+        // Custom backend: image returned as fileData.fileUri (URL)
+        if (part.fileData && part.fileData.fileUri) {
+          const resultDataUrl = await fetchFileUriAsDataUrl(
+            part.fileData.fileUri,
+            part.fileData.mimeType || 'image/png',
+          )
+          if (originalWidth > 0 && originalHeight > 0) {
+            return await resizeImageToTarget(resultDataUrl, originalWidth, originalHeight)
+          }
+          return resultDataUrl
+        }
       }
 
       throw new Error('No image in Gemini response')
@@ -446,6 +458,17 @@ Output: A single clean image with all text removed.`
               const resultDataUrl = `data:${resultMimeType};base64,${part.inlineData.data}`
 
               // Resize to match original dimensions if needed
+              if (originalWidth > 0 && originalHeight > 0) {
+                return await resizeImageToTarget(resultDataUrl, originalWidth, originalHeight)
+              }
+              return resultDataUrl
+            }
+            // Custom backend: image returned as fileData.fileUri (URL)
+            if (part.fileData && part.fileData.fileUri) {
+              const resultDataUrl = await fetchFileUriAsDataUrl(
+                part.fileData.fileUri,
+                part.fileData.mimeType || 'image/png',
+              )
               if (originalWidth > 0 && originalHeight > 0) {
                 return await resizeImageToTarget(resultDataUrl, originalWidth, originalHeight)
               }
